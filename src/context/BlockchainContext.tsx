@@ -42,6 +42,25 @@ export interface SystemAlert {
   status: 'Unresolved' | 'Resolved';
 }
 
+export interface AuditLog {
+  id: string;
+  timestamp: string;
+  action: string;
+  userRole: string;
+  details: string;
+  hash: string;
+}
+
+export interface Proposal {
+  id: string;
+  title: string;
+  description: string;
+  author: string;
+  votes: number;
+  status: 'Pending' | 'Under Review' | 'Approved for Planning' | 'Rejected';
+  createdAt: string;
+}
+
 export type ProjectStatus = 'Pending' | 'Allocated' | 'In Progress' | 'Milestone Verified' | 'Completed' | 'On Hold';
 
 export interface Project {
@@ -64,6 +83,8 @@ export interface Project {
 interface BlockchainContextType {
   projects: Project[];
   alerts: SystemAlert[];
+  auditLogs: AuditLog[];
+  proposals: Proposal[];
   addProject: (project: Omit<Project, 'id' | 'allocatedFunds' | 'disbursedFunds' | 'documents' | 'transactions' | 'status' | 'createdAt' | 'milestones'>) => void;
   addMilestone: (projectId: string, milestone: Omit<Milestone, 'id'>) => void;
   verifyMilestone: (projectId: string, milestoneId: string, verifiedBy: string, photoUrl: string) => void;
@@ -71,6 +92,9 @@ interface BlockchainContextType {
   addTransaction: (projectId: string, transaction: Omit<Transaction, 'id' | 'hash' | 'projectId'>, saro?: string) => void;
   resolveAlert: (alertId: string) => void;
   addPublicReport: (projectId: string, message: string) => void;
+  addProposal: (proposal: Omit<Proposal, 'id' | 'votes' | 'status' | 'createdAt'>) => void;
+  upvoteProposal: (proposalId: string) => void;
+  updateProposalStatus: (proposalId: string, status: Proposal['status']) => void;
 }
 
 const mockProjects: Project[] = [
@@ -163,13 +187,68 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       status: 'Unresolved'
     }
   ]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([
+    {
+      id: 'log-1',
+      timestamp: '2026-01-15T08:00:00Z',
+      action: 'Project Created',
+      userRole: 'Admin / HR',
+      details: 'Created project Pagsawitan Drainage Repair',
+      hash: '0x1a2b...3c4d'
+    },
+    {
+      id: 'log-2',
+      timestamp: '2026-02-10T09:00:00Z',
+      action: 'Funds Allocated',
+      userRole: 'Budget Officer',
+      details: 'Allocated ₱500,000 to proj-001 (SARO-2026-001)',
+      hash: '0x8f7e...6d5c'
+    }
+  ]);
+  const [proposals, setProposals] = useState<Proposal[]>([
+    { id: 'PROP-001', title: 'Solar Street Lights in Brgy. San Jose', description: 'Install 50 solar street lights along the main road.', author: 'Maria Santos', votes: 145, status: 'Under Review', createdAt: new Date(Date.now() - 86400000 * 5).toISOString() },
+    { id: 'PROP-002', title: 'Repair of Basketball Court Roof', description: 'The roof of the covered court in Brgy. Poblacion is leaking.', author: 'Juan Dela Cruz', votes: 89, status: 'Pending', createdAt: new Date(Date.now() - 86400000 * 2).toISOString() },
+    { id: 'PROP-003', title: 'New Drainage System for Purok 4', description: 'Frequent flooding in Purok 4 requires a new drainage canal.', author: 'Elena Reyes', votes: 210, status: 'Approved for Planning', createdAt: new Date(Date.now() - 86400000 * 10).toISOString() },
+  ]);
 
   const generateHash = () => {
     return '0x' + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
   };
 
+  const logAction = (action: string, userRole: string, details: string, hash: string) => {
+    setAuditLogs(prev => [{
+      id: `log-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      action,
+      userRole,
+      details,
+      hash
+    }, ...prev]);
+  };
+
+  const addProposal = (proposalData: Omit<Proposal, 'id' | 'votes' | 'status' | 'createdAt'>) => {
+    const newProposal: Proposal = {
+      ...proposalData,
+      id: `PROP-${Date.now()}`,
+      votes: 1,
+      status: 'Pending',
+      createdAt: new Date().toISOString()
+    };
+    setProposals([...proposals, newProposal]);
+  };
+
+  const upvoteProposal = (proposalId: string) => {
+    setProposals(proposals.map(p => p.id === proposalId ? { ...p, votes: p.votes + 1 } : p));
+  };
+
+  const updateProposalStatus = (proposalId: string, status: Proposal['status']) => {
+    setProposals(proposals.map(p => p.id === proposalId ? { ...p, status } : p));
+    logAction('Proposal Updated', 'MPDC (Planning)', `Updated proposal ${proposalId} to ${status}`, generateHash());
+  };
+
   const resolveAlert = (alertId: string) => {
     setAlerts(alerts.map(a => a.id === alertId ? { ...a, status: 'Resolved' } : a));
+    logAction('Alert Resolved', 'Admin / HR', `Resolved alert ${alertId}`, generateHash());
   };
 
   const addPublicReport = (projectId: string, message: string) => {
@@ -218,6 +297,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       ]
     };
     setProjects([...projects, newProject]);
+    logAction('Project Created', 'Admin / HR', `Created project ${projectData.name}`, generateHash());
   };
 
   const addMilestone = (projectId: string, milestoneData: Omit<Milestone, 'id'>) => {
@@ -255,18 +335,21 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       }
       return p;
     }));
+    logAction('Milestone Verified', 'MPDC (Planning)', `Verified milestone ${milestoneId} on project ${projectId}`, generateHash());
   };
 
   const addDocument = (projectId: string, documentData: Omit<Document, 'id'>) => {
+    const docId = `doc-${Date.now()}`;
     setProjects(projects.map(p => {
       if (p.id === projectId) {
         return {
           ...p,
-          documents: [...p.documents, { ...documentData, id: `doc-${Date.now()}` }]
+          documents: [...p.documents, { ...documentData, id: docId }]
         };
       }
       return p;
     }));
+    logAction('Document Uploaded', 'Admin / HR', `Uploaded ${documentData.title} to project ${projectId}`, generateHash());
   };
 
   const addTransaction = (projectId: string, txData: Omit<Transaction, 'id' | 'hash' | 'projectId'>, saro?: string) => {
@@ -281,6 +364,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
         date: new Date().toISOString(),
         status: 'Unresolved'
       }]);
+      logAction('Transaction Frozen', txData.recordedByRole, `Over-disbursement attempt on project ${projectId}`, generateHash());
       throw new Error('Transaction frozen: Disbursement exceeds allocated budget.');
     }
 
@@ -302,7 +386,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
           newStatus = 'Allocated';
         } else if (txData.type === 'Disbursement (NCA)') {
           newDisbursed += txData.amount;
-          newStatus = 'In Progress';
+          newStatus = newDisbursed >= p.totalBudget ? 'Completed' : 'In Progress';
         }
 
         const updatedMilestones = p.milestones.map(m => {
@@ -324,10 +408,12 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       }
       return p;
     }));
+    
+    logAction(txData.type, txData.recordedByRole, `Amount: ₱${txData.amount} on project ${projectId}`, newTx.hash);
   };
 
   return (
-    <BlockchainContext.Provider value={{ projects, alerts, addProject, addMilestone, verifyMilestone, addDocument, addTransaction, resolveAlert, addPublicReport }}>
+    <BlockchainContext.Provider value={{ projects, alerts, auditLogs, proposals, addProject, addMilestone, verifyMilestone, addDocument, addTransaction, resolveAlert, addPublicReport, addProposal, upvoteProposal, updateProposalStatus }}>
       {children}
     </BlockchainContext.Provider>
   );

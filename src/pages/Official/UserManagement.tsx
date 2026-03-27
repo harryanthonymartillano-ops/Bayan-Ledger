@@ -21,12 +21,14 @@ export const UserManagement = () => {
     const name = formData.get('name') as string;
     const email = formData.get('email') as string;
     const role = formData.get('role') as Role;
+    const walletAddress = formData.get('walletAddress') as string;
 
     addRegisteredUser({
       name,
       email,
       role,
-      status: 'Active'
+      status: 'Active',
+      walletAddress
     });
 
     setIsAddingUser(false);
@@ -45,21 +47,22 @@ export const UserManagement = () => {
             Manage official accounts and access control for the Sta. Cruz Chain.
           </p>
         </div>
-        {!isAddingUser && (
-          <Button onClick={() => setIsAddingUser(true)} className="bg-blue-600 hover:bg-blue-700">
-            <UserPlus className="w-4 h-4 mr-2" /> Add Official
-          </Button>
-        )}
+        <Button onClick={() => setIsAddingUser(true)} className="bg-blue-600 hover:bg-blue-700">
+          <UserPlus className="w-4 h-4 mr-2" /> Add Official
+        </Button>
       </div>
 
       {isAddingUser && (
-        <Card className="mb-8 border-blue-200 shadow-md">
-          <CardHeader className="bg-blue-50 border-b border-blue-100 pb-4">
-            <CardTitle className="text-lg text-blue-900">Register New Official</CardTitle>
-            <CardDescription className="text-blue-700">Create a new account with specific role permissions.</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <form onSubmit={handleAddUser} className="space-y-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-blue-50">
+              <div>
+                <h3 className="text-xl font-bold text-blue-900">Register New Official</h3>
+                <p className="text-sm text-blue-700 mt-1">Create a new account with specific role permissions.</p>
+              </div>
+              <button onClick={() => setIsAddingUser(false)} className="text-slate-400 hover:text-slate-600 self-start">&times;</button>
+            </div>
+            <form onSubmit={handleAddUser} className="p-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">Full Name</label>
@@ -69,7 +72,11 @@ export const UserManagement = () => {
                   <label className="text-sm font-medium text-slate-700">Email Address</label>
                   <Input name="email" type="email" placeholder="e.g. official@stacruz.gov.ph" required />
                 </div>
-                <div className="space-y-2 md:col-span-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">Wallet Address (Public Key)</label>
+                  <Input name="walletAddress" placeholder="e.g. 0x..." required />
+                </div>
+                <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">Official Role</label>
                   <select name="role" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" required>
                     <option value="">Select a role...</option>
@@ -85,14 +92,14 @@ export const UserManagement = () => {
                 <Button type="submit" className="bg-blue-600 hover:bg-blue-700">Create Account</Button>
               </div>
             </form>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
       <Card className="border-slate-200 shadow-sm">
         <CardHeader className="border-b border-slate-100 pb-4">
           <CardTitle className="text-xl">Registered Officials</CardTitle>
-          <CardDescription>List of all authorized personnel on the blockchain network.</CardDescription>
+          <CardDescription>List of all authorized personnel and their wallet addresses on the blockchain network.</CardDescription>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -101,6 +108,7 @@ export const UserManagement = () => {
                 <TableHead>Name</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Email</TableHead>
+                <TableHead>Wallet Address</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -127,6 +135,9 @@ export const UserManagement = () => {
                       <Mail className="w-3 h-3 mr-2 text-slate-400" />
                       {u.email}
                     </div>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-slate-500">
+                    {u.walletAddress}
                   </TableCell>
                   <TableCell>
                     {u.status === 'Active' ? (

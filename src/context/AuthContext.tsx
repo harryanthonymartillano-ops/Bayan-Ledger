@@ -14,6 +14,7 @@ export interface RegisteredUser {
   role: Role;
   email: string;
   status: 'Active' | 'Inactive';
+  walletAddress: string;
 }
 
 interface AuthContextType {
@@ -30,10 +31,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [registeredUsers, setRegisteredUsers] = useState<RegisteredUser[]>([
-    { id: 'user-mpdc-1', name: 'Maria Santos', role: 'MPDC (Planning)', email: 'maria.santos@stacruz.gov.ph', status: 'Active' },
-    { id: 'user-budget-1', name: 'Juan Dela Cruz', role: 'Budget Officer', email: 'juan.delacruz@stacruz.gov.ph', status: 'Active' },
-    { id: 'user-treasurer-1', name: 'Elena Reyes', role: 'Treasurer', email: 'elena.reyes@stacruz.gov.ph', status: 'Active' },
-    { id: 'user-admin-1', name: 'Admin User', role: 'Admin / HR', email: 'admin@stacruz.gov.ph', status: 'Active' },
+    { id: 'user-mpdc-1', name: 'Maria Santos', role: 'MPDC (Planning)', email: 'maria.santos@stacruz.gov.ph', status: 'Active', walletAddress: '0x71C...976F' },
+    { id: 'user-budget-1', name: 'Juan Dela Cruz', role: 'Budget Officer', email: 'juan.delacruz@stacruz.gov.ph', status: 'Active', walletAddress: '0x89D...12A4' },
+    { id: 'user-treasurer-1', name: 'Elena Reyes', role: 'Treasurer', email: 'elena.reyes@stacruz.gov.ph', status: 'Active', walletAddress: '0x45B...88C2' },
+    { id: 'user-admin-1', name: 'Admin User', role: 'Admin / HR', email: 'admin@stacruz.gov.ph', status: 'Active', walletAddress: '0x12A...34B5' },
   ]);
 
   const login = (role: Role) => {

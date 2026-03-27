@@ -13,13 +13,16 @@ export const PublicLayout = () => {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
               <Link to="/" className="flex items-center gap-2">
-                <Shield className="h-8 w-8 text-blue-600" />
+                <img src="https://upload.wikimedia.org/wikipedia/commons/8/88/Santa_Cruz_Laguna_Seal.png" alt="Santa Cruz Logo" className="h-10 w-10 object-contain" referrerPolicy="no-referrer" />
                 <span className="font-bold text-xl tracking-tight text-slate-900">Sta. Cruz <span className="text-blue-600">Chain</span></span>
               </Link>
             </div>
             <nav className="flex items-center gap-6">
               <Link to="/projects" className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">
                 Projects Portal
+              </Link>
+              <Link to="/proposals" className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">
+                Citizen Proposals
               </Link>
               {user ? (
                 <Link to="/official/dashboard">

@@ -6,7 +6,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
-import { MapPin, CheckCircle, Activity, Clock, Plus, FileText, FileCheck, FileSignature, Landmark, ArrowLeft, AlertTriangle } from 'lucide-react';
+import { MapPin, CheckCircle, Activity, Clock, Plus, FileText, FileCheck, FileSignature, Landmark, ArrowLeft, AlertTriangle, ShieldCheck } from 'lucide-react';
 import { format } from 'date-fns';
 
 export const Dashboard = () => {
@@ -49,7 +49,10 @@ export const Dashboard = () => {
             {pendingMilestones.length > 0 ? (
               <div className="p-4 bg-blue-50 border border-blue-100 rounded-lg">
                 <h4 className="font-semibold text-blue-900 mb-2 flex items-center"><MapPin className="w-4 h-4 mr-2" /> Verify Progress Milestone</h4>
-                <p className="text-sm text-blue-700 mb-4">Upload a photo/report to sign and verify that the contractor has hit the milestone. The smart contract validates this signature.</p>
+                <p className="text-sm text-blue-700 mb-4">
+                  Upload a photo/report to sign and verify that the contractor has hit the milestone. The smart contract validates this signature. 
+                  <strong> This file is permanently attached to the blockchain record and visible to the public for transparency.</strong>
+                </p>
                 <form className="space-y-3" onSubmit={(e) => {
                   e.preventDefault();
                   const formData = new FormData(e.currentTarget);
@@ -60,9 +63,15 @@ export const Dashboard = () => {
                 }}>
                   <select name="milestoneId" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" required>
                     <option value="">Select milestone to verify...</option>
-                    {pendingMilestones.map(m => (
-                      <option key={m.id} value={m.id}>{m.title} ({m.percentage}%)</option>
-                    ))}
+                    {project.milestones.map((m, index) => {
+                      if (m.status !== 'Pending') return null;
+                      const isPreviousVerified = index === 0 || project.milestones[index - 1].status === 'Verified' || project.milestones[index - 1].status === 'Paid';
+                      return (
+                        <option key={m.id} value={m.id} disabled={!isPreviousVerified}>
+                          {m.title} ({m.percentage}%) {!isPreviousVerified ? '(Previous milestone incomplete)' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
                   <Input type="file" accept="image/*" className="cursor-pointer" required />
                   <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700">Verify & Sign Milestone</Button>
@@ -203,6 +212,123 @@ export const Dashboard = () => {
   };
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState('');
+
+  const renderDashboardWidgets = () => {
+    switch (user.role) {
+      case 'MPDC (Planning)':
+        const pendingMilestonesCount = projects.reduce((acc, p) => acc + p.milestones.filter(m => m.status === 'Pending').length, 0);
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <Card className="border-blue-200 bg-blue-50 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-blue-800 uppercase tracking-wider">Pending Milestones</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-blue-900">{pendingMilestonesCount}</div>
+                <p className="text-xs text-blue-600 mt-1">Awaiting verification</p>
+              </CardContent>
+            </Card>
+          </div>
+        );
+      case 'Budget Officer':
+        const totalAllotment = projects.reduce((acc, p) => acc + p.allocatedFunds, 0);
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <Card className="border-amber-200 bg-amber-50 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-amber-800 uppercase tracking-wider">Total Allotment (SARO)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-amber-900">{formatCurrency(totalAllotment)}</div>
+                <p className="text-xs text-amber-600 mt-1">Locked funds across all projects</p>
+              </CardContent>
+            </Card>
+          </div>
+        );
+      case 'Treasurer':
+        const totalDisbursed = projects.reduce((acc, p) => acc + p.disbursedFunds, 0);
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <Card className="border-emerald-200 bg-emerald-50 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-emerald-800 uppercase tracking-wider">Total Disbursed (NCA)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-emerald-900">{formatCurrency(totalDisbursed)}</div>
+                <p className="text-xs text-emerald-600 mt-1">Released funds across all projects</p>
+              </CardContent>
+            </Card>
+          </div>
+        );
+      case 'Admin / HR':
+        // Mock active users count for now, or we can use a context if we had one.
+        // Since we don't have a users list in context yet, we'll just show a static number or 4 (the roles).
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <Card className="border-purple-200 bg-purple-50 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-purple-800 uppercase tracking-wider">Active Users</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-purple-900">4</div>
+                <p className="text-xs text-purple-600 mt-1">Registered officials</p>
+              </CardContent>
+            </Card>
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
+  const renderMultiSigIndicator = (project: Project) => {
+    const isBudgetAllocated = project.allocatedFunds > 0;
+    const isMilestoneVerified = project.milestones.some(m => m.status === 'Verified' || m.status === 'Paid');
+    const isPaymentPending = isMilestoneVerified && project.disbursedFunds < project.allocatedFunds;
+    const isFullyPaid = project.allocatedFunds > 0 && project.disbursedFunds >= project.allocatedFunds;
+    const isPartiallyPaid = project.disbursedFunds > 0 && project.disbursedFunds < project.allocatedFunds;
+
+    return (
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-6 mb-8">
+        <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4 flex items-center">
+          <ShieldCheck className="w-4 h-4 mr-2 text-blue-600" />
+          Blockchain Multi-Sig Status
+        </h3>
+        <div className="flex flex-col md:flex-row gap-4 justify-between">
+          <div className={`flex-1 p-4 rounded-lg border ${isBudgetAllocated ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'}`}>
+            <div className="flex items-center mb-2">
+              {isBudgetAllocated ? <CheckCircle className="w-5 h-5 text-emerald-500 mr-2" /> : <Clock className="w-5 h-5 text-slate-400 mr-2" />}
+              <span className={`font-medium ${isBudgetAllocated ? 'text-emerald-900' : 'text-slate-600'}`}>Budget Officer</span>
+            </div>
+            <p className={`text-sm ${isBudgetAllocated ? 'text-emerald-700' : 'text-slate-500'}`}>
+              {isBudgetAllocated ? 'Allotted Funds (Digital Signature Found)' : 'Pending Allocation'}
+            </p>
+          </div>
+
+          <div className={`flex-1 p-4 rounded-lg border ${isMilestoneVerified ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'}`}>
+            <div className="flex items-center mb-2">
+              {isMilestoneVerified ? <CheckCircle className="w-5 h-5 text-emerald-500 mr-2" /> : <Clock className="w-5 h-5 text-slate-400 mr-2" />}
+              <span className={`font-medium ${isMilestoneVerified ? 'text-emerald-900' : 'text-slate-600'}`}>MPDC</span>
+            </div>
+            <p className={`text-sm ${isMilestoneVerified ? 'text-emerald-700' : 'text-slate-500'}`}>
+              {isMilestoneVerified ? 'Verified Milestone (Digital Signature Found)' : 'Pending Verification'}
+            </p>
+          </div>
+
+          <div className={`flex-1 p-4 rounded-lg border ${isFullyPaid ? 'bg-emerald-50 border-emerald-200' : isPaymentPending ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+            <div className="flex items-center mb-2">
+              {isFullyPaid ? <CheckCircle className="w-5 h-5 text-emerald-500 mr-2" /> : isPaymentPending ? <AlertTriangle className="w-5 h-5 text-amber-500 mr-2" /> : <Clock className="w-5 h-5 text-slate-400 mr-2" />}
+              <span className={`font-medium ${isFullyPaid ? 'text-emerald-900' : isPaymentPending ? 'text-amber-900' : 'text-slate-600'}`}>Treasurer</span>
+            </div>
+            <p className={`text-sm ${isFullyPaid ? 'text-emerald-700' : isPaymentPending ? 'text-amber-700' : 'text-slate-500'}`}>
+              {isFullyPaid ? 'Fully Paid (Digital Signature Found)' : isPartiallyPaid ? 'Partially Paid (Pending Signatures)' : isPaymentPending ? 'Payment Pending (Waiting for Signature)' : 'Pending Payment'}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -216,14 +342,23 @@ export const Dashboard = () => {
             <form onSubmit={(e) => {
               e.preventDefault();
               const formData = new FormData(e.currentTarget);
+              const category = formData.get('category') as string;
+              const customCategory = formData.get('customCategory') as string;
+              const finalCategory = category === 'Other' ? customCategory : category;
+              
+              const barangay = formData.get('barangay') as string;
+              const specificLocation = formData.get('specificLocation') as string;
+              const finalLocation = `${specificLocation}, ${barangay}`;
+
               addProject({
                 name: formData.get('name') as string,
                 description: formData.get('description') as string,
-                location: formData.get('location') as string,
-                category: formData.get('category') as string,
+                location: finalLocation,
+                category: finalCategory,
                 totalBudget: Number(formData.get('totalBudget')),
               });
               setIsCreateModalOpen(false);
+              setSelectedCategory('');
               alert('Project created successfully. The smart contract has generated a unique Project ID and set status to "Pending".');
             }} className="p-6 space-y-4">
               <div>
@@ -234,26 +369,53 @@ export const Dashboard = () => {
                 <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
                 <Input name="description" placeholder="Brief project description" required />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Location (Barangay)</label>
-                <Input name="location" placeholder="e.g., Pagsawitan" required />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Barangay</label>
+                  <select name="barangay" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" required>
+                    <option value="">Select Barangay...</option>
+                    <option value="Pagsawitan">Pagsawitan</option>
+                    <option value="Poblacion">Poblacion</option>
+                    <option value="San Pablo">San Pablo</option>
+                    <option value="Santo Angel">Santo Angel</option>
+                    <option value="Gatid">Gatid</option>
+                    <option value="Bagumbayan">Bagumbayan</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Specific Location</label>
+                  <Input name="specificLocation" placeholder="e.g., Purok 4, Rizal St." required />
+                </div>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
-                <select name="category" className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" required>
+                <select 
+                  name="category" 
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2" 
+                  required
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                >
                   <option value="">Select category...</option>
                   <option value="Infrastructure">Infrastructure</option>
                   <option value="Health">Health</option>
                   <option value="Education">Education</option>
                   <option value="Social Services">Social Services</option>
+                  <option value="Other">Other (Add New)</option>
                 </select>
               </div>
+              {selectedCategory === 'Other' && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Custom Category</label>
+                  <Input name="customCategory" placeholder="e.g., Environmental" required />
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Total Budget (PHP)</label>
                 <Input name="totalBudget" type="number" min="1" placeholder="e.g., 500000" required />
               </div>
               <div className="pt-4 flex justify-end gap-3">
-                <Button type="button" variant="outline" onClick={() => setIsCreateModalOpen(false)}>Cancel</Button>
+                <Button type="button" variant="outline" onClick={() => { setIsCreateModalOpen(false); setSelectedCategory(''); }}>Cancel</Button>
                 <Button type="submit" className="bg-blue-600 hover:bg-blue-700">Create Project</Button>
               </div>
             </form>
@@ -262,8 +424,10 @@ export const Dashboard = () => {
       )}
 
       {!selectedProject ? (
-        <Card className="border-slate-200 shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between border-b border-slate-100 pb-6">
+        <>
+          {renderDashboardWidgets()}
+          <Card className="border-slate-200 shadow-sm">
+            <CardHeader className="flex flex-row items-center justify-between border-b border-slate-100 pb-6">
             <div>
               <CardTitle className="text-2xl">Projects Overview</CardTitle>
               <CardDescription>Manage and track all municipal projects.</CardDescription>
@@ -316,6 +480,7 @@ export const Dashboard = () => {
             </Table>
           </CardContent>
         </Card>
+        </>
       ) : (
         <div className="space-y-6">
           <Button variant="ghost" className="mb-2 -ml-4" onClick={() => setSelectedProject(null)}>
@@ -361,6 +526,8 @@ export const Dashboard = () => {
                   <p className="text-2xl font-bold text-emerald-700">{formatCurrency(projects.find(p => p.id === selectedProject)?.disbursedFunds || 0)}</p>
                 </div>
               </div>
+
+              {renderMultiSigIndicator(projects.find(p => p.id === selectedProject)!)}
 
               <div className="border-t border-slate-200 pt-8">
                 <h3 className="text-xl font-semibold mb-4 text-slate-900">Role Actions</h3>

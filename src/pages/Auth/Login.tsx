@@ -30,8 +30,8 @@ export const Login = () => {
       <Card className="w-full max-w-lg shadow-xl border-slate-200">
         <CardHeader className="space-y-1 text-center pb-8">
           <div className="flex justify-center mb-4">
-            <div className="bg-blue-100 p-3 rounded-full">
-              <Shield className="h-10 w-10 text-blue-600" />
+            <div className="bg-blue-50 p-3 rounded-full">
+              <img src="https://upload.wikimedia.org/wikipedia/commons/8/88/Santa_Cruz_Laguna_Seal.png" alt="Santa Cruz Logo" className="h-16 w-16 object-contain" referrerPolicy="no-referrer" />
             </div>
           </div>
           <CardTitle className="text-2xl font-bold tracking-tight">Official Login</CardTitle>

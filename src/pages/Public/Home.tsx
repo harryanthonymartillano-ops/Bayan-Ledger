@@ -26,6 +26,11 @@ export const Home = () => {
                 View Public Projects <ArrowRight className="ml-2 w-5 h-5" />
               </Button>
             </Link>
+            <Link to="/proposals">
+              <Button size="lg" variant="outline" className="text-white bg-transparent hover:bg-white/10 border-white/20 h-14 px-8 text-lg w-full sm:w-auto">
+                Submit Proposal
+              </Button>
+            </Link>
             <Link to="/login">
               <Button size="lg" variant="outline" className="text-slate-900 bg-white hover:bg-slate-100 border-transparent h-14 px-8 text-lg w-full sm:w-auto">
                 Official Portal
