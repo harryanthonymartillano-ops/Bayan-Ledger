@@ -262,10 +262,8 @@ export const Dashboard = () => {
           </div>
         );
       case 'Admin / HR':
-        // Mock active users count for now, or we can use a context if we had one.
-        // Since we don't have a users list in context yet, we'll just show a static number or 4 (the roles).
         return (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
             <Card className="border-purple-200 bg-purple-50 shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-purple-800 uppercase tracking-wider">Active Users</CardTitle>
@@ -273,6 +271,17 @@ export const Dashboard = () => {
               <CardContent>
                 <div className="text-3xl font-bold text-purple-900">4</div>
                 <p className="text-xs text-purple-600 mt-1">Registered officials</p>
+              </CardContent>
+            </Card>
+            <Card className="border-slate-200 bg-white shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-slate-800 uppercase tracking-wider flex items-center">
+                  <AlertTriangle className="w-4 h-4 mr-2 text-amber-500" /> Active Alerts
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-slate-900">{alerts.filter(a => a.status === 'Unresolved').length}</div>
+                <p className="text-xs text-slate-500 mt-1">Requiring admin review</p>
               </CardContent>
             </Card>
           </div>

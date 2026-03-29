@@ -1,5 +1,7 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { Role } from './AuthContext';
+import { connectWallet, getContract, getWeb3Provider } from '../lib/web3';
+import { ethers } from 'ethers';
 
 export interface Milestone {
   id: string;
@@ -85,11 +87,14 @@ interface BlockchainContextType {
   alerts: SystemAlert[];
   auditLogs: AuditLog[];
   proposals: Proposal[];
-  addProject: (project: Omit<Project, 'id' | 'allocatedFunds' | 'disbursedFunds' | 'documents' | 'transactions' | 'status' | 'createdAt' | 'milestones'>) => void;
+  isWeb3Connected: boolean;
+  walletAddress: string | null;
+  connectToWeb3: () => Promise<void>;
+  addProject: (project: Omit<Project, 'id' | 'allocatedFunds' | 'disbursedFunds' | 'documents' | 'transactions' | 'status' | 'createdAt' | 'milestones'>) => Promise<void>;
   addMilestone: (projectId: string, milestone: Omit<Milestone, 'id'>) => void;
-  verifyMilestone: (projectId: string, milestoneId: string, verifiedBy: string, photoUrl: string) => void;
+  verifyMilestone: (projectId: string, milestoneId: string, verifiedBy: string, photoUrl: string) => Promise<void>;
   addDocument: (projectId: string, document: Omit<Document, 'id'>) => void;
-  addTransaction: (projectId: string, transaction: Omit<Transaction, 'id' | 'hash' | 'projectId'>, saro?: string) => void;
+  addTransaction: (projectId: string, transaction: Omit<Transaction, 'id' | 'hash' | 'projectId'>, saro?: string) => Promise<void>;
   resolveAlert: (alertId: string) => void;
   addPublicReport: (projectId: string, message: string) => void;
   addProposal: (proposal: Omit<Proposal, 'id' | 'votes' | 'status' | 'createdAt'>) => void;
@@ -189,12 +194,20 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
   ]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([
     {
-      id: 'log-1',
-      timestamp: '2026-01-15T08:00:00Z',
-      action: 'Project Created',
-      userRole: 'Admin / HR',
-      details: 'Created project Pagsawitan Drainage Repair',
-      hash: '0x1a2b...3c4d'
+      id: 'log-4',
+      timestamp: '2026-03-29T09:04:50Z',
+      action: 'Proposal Updated',
+      userRole: 'MPDC (Planning)',
+      details: 'Updated proposal PROP-002 to Under Review',
+      hash: '0xe2f7b5863fc678dcd9b51541707ff8b0eb3444a41229e066bdccd7ee47090663'
+    },
+    {
+      id: 'log-3',
+      timestamp: '2026-03-29T09:04:29Z',
+      action: 'Proposal Updated',
+      userRole: 'MPDC (Planning)',
+      details: 'Updated proposal PROP-001 to Approved for Planning',
+      hash: '0xe61667ce77db96586e7ea70128cf21738a5f71eaacfff2fb0b44d96fdeebaf4f'
     },
     {
       id: 'log-2',
@@ -203,6 +216,14 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       userRole: 'Budget Officer',
       details: 'Allocated ₱500,000 to proj-001 (SARO-2026-001)',
       hash: '0x8f7e...6d5c'
+    },
+    {
+      id: 'log-1',
+      timestamp: '2026-01-15T08:00:00Z',
+      action: 'Project Created',
+      userRole: 'MPDC (Planning)',
+      details: 'Created project Pagsawitan Drainage Repair',
+      hash: '0x1a2b...3c4d'
     }
   ]);
   const [proposals, setProposals] = useState<Proposal[]>([
@@ -210,6 +231,42 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     { id: 'PROP-002', title: 'Repair of Basketball Court Roof', description: 'The roof of the covered court in Brgy. Poblacion is leaking.', author: 'Juan Dela Cruz', votes: 89, status: 'Pending', createdAt: new Date(Date.now() - 86400000 * 2).toISOString() },
     { id: 'PROP-003', title: 'New Drainage System for Purok 4', description: 'Frequent flooding in Purok 4 requires a new drainage canal.', author: 'Elena Reyes', votes: 210, status: 'Approved for Planning', createdAt: new Date(Date.now() - 86400000 * 10).toISOString() },
   ]);
+
+  const [isWeb3Connected, setIsWeb3Connected] = useState(false);
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [contract, setContract] = useState<ethers.Contract | null>(null);
+
+  useEffect(() => {
+    // Check if already connected
+    const checkConnection = async () => {
+      const provider = getWeb3Provider();
+      if (provider) {
+        const accounts = await provider.listAccounts();
+        if (accounts.length > 0) {
+          const signer = await provider.getSigner();
+          setWalletAddress(accounts[0].address);
+          setIsWeb3Connected(true);
+          const contractInstance = await getContract(signer);
+          setContract(contractInstance);
+        }
+      }
+    };
+    checkConnection();
+  }, []);
+
+  const connectToWeb3 = async () => {
+    try {
+      const signer = await connectWallet();
+      const address = await signer.getAddress();
+      setWalletAddress(address);
+      setIsWeb3Connected(true);
+      const contractInstance = await getContract(signer);
+      setContract(contractInstance);
+    } catch (error) {
+      console.error("Failed to connect wallet:", error);
+      alert("Failed to connect wallet. Please ensure MetaMask is installed and unlocked.");
+    }
+  };
 
   const generateHash = () => {
     return '0x' + Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
@@ -261,8 +318,23 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     }]);
   };
 
-  const addProject = (projectData: Omit<Project, 'id' | 'allocatedFunds' | 'disbursedFunds' | 'documents' | 'transactions' | 'status' | 'createdAt' | 'milestones'>) => {
+  const addProject = async (projectData: Omit<Project, 'id' | 'allocatedFunds' | 'disbursedFunds' | 'documents' | 'transactions' | 'status' | 'createdAt' | 'milestones'>) => {
     const projectId = `proj-${Date.now()}`;
+    
+    let txHash = generateHash();
+    if (isWeb3Connected && contract) {
+      try {
+        // Mocking the call since we don't have a real deployed contract
+        // const tx = await contract.createProject(projectId, projectData.name, projectData.totalBudget);
+        // await tx.wait();
+        // txHash = tx.hash;
+        console.log("Would call smart contract: createProject", projectId, projectData.name, projectData.totalBudget);
+      } catch (error) {
+        console.error("Smart contract call failed:", error);
+        // Fallback to mock behavior for demo purposes
+      }
+    }
+
     const newProject: Project = {
       ...projectData,
       id: projectId,
@@ -297,7 +369,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       ]
     };
     setProjects([...projects, newProject]);
-    logAction('Project Created', 'Admin / HR', `Created project ${projectData.name}`, generateHash());
+    logAction('Project Created', 'MPDC (Planning)', `Created project ${projectData.name}`, txHash);
   };
 
   const addMilestone = (projectId: string, milestoneData: Omit<Milestone, 'id'>) => {
@@ -312,7 +384,20 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     }));
   };
 
-  const verifyMilestone = (projectId: string, milestoneId: string, verifiedBy: string, photoUrl: string) => {
+  const verifyMilestone = async (projectId: string, milestoneId: string, verifiedBy: string, photoUrl: string) => {
+    let txHash = generateHash();
+    if (isWeb3Connected && contract) {
+      try {
+        // Mocking the call
+        // const tx = await contract.verifyMilestone(projectId, milestoneId, 100, "ipfsHashPlaceholder");
+        // await tx.wait();
+        // txHash = tx.hash;
+        console.log("Would call smart contract: verifyMilestone", projectId, milestoneId);
+      } catch (error) {
+        console.error("Smart contract call failed:", error);
+      }
+    }
+
     setProjects(projects.map(p => {
       if (p.id === projectId) {
         const updatedMilestones = p.milestones.map(m => {
@@ -335,7 +420,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       }
       return p;
     }));
-    logAction('Milestone Verified', 'MPDC (Planning)', `Verified milestone ${milestoneId} on project ${projectId}`, generateHash());
+    logAction('Milestone Verified', 'MPDC (Planning)', `Verified milestone ${milestoneId} on project ${projectId}`, txHash);
   };
 
   const addDocument = (projectId: string, documentData: Omit<Document, 'id'>) => {
@@ -352,7 +437,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     logAction('Document Uploaded', 'Admin / HR', `Uploaded ${documentData.title} to project ${projectId}`, generateHash());
   };
 
-  const addTransaction = (projectId: string, txData: Omit<Transaction, 'id' | 'hash' | 'projectId'>, saro?: string) => {
+  const addTransaction = async (projectId: string, txData: Omit<Transaction, 'id' | 'hash' | 'projectId'>, saro?: string) => {
     const project = projects.find(p => p.id === projectId);
     if (!project) return;
 
@@ -368,11 +453,30 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       throw new Error('Transaction frozen: Disbursement exceeds allocated budget.');
     }
 
+    let txHash = generateHash();
+    if (isWeb3Connected && contract) {
+      try {
+        if (txData.type === 'Allocation (SARO)') {
+          // const tx = await contract.allocateFunds(projectId, txData.amount, saro || "");
+          // await tx.wait();
+          // txHash = tx.hash;
+          console.log("Would call smart contract: allocateFunds", projectId, txData.amount, saro);
+        } else if (txData.type === 'Disbursement (NCA)') {
+          // const tx = await contract.disburseFunds(projectId, txData.amount);
+          // await tx.wait();
+          // txHash = tx.hash;
+          console.log("Would call smart contract: disburseFunds", projectId, txData.amount);
+        }
+      } catch (error) {
+        console.error("Smart contract call failed:", error);
+      }
+    }
+
     const newTx: Transaction = {
       ...txData,
       id: `tx-${Date.now()}`,
       projectId,
-      hash: generateHash()
+      hash: txHash
     };
 
     setProjects(projects.map(p => {
@@ -413,7 +517,11 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <BlockchainContext.Provider value={{ projects, alerts, auditLogs, proposals, addProject, addMilestone, verifyMilestone, addDocument, addTransaction, resolveAlert, addPublicReport, addProposal, upvoteProposal, updateProposalStatus }}>
+    <BlockchainContext.Provider value={{ 
+      projects, alerts, auditLogs, proposals, 
+      isWeb3Connected, walletAddress, connectToWeb3,
+      addProject, addMilestone, verifyMilestone, addDocument, addTransaction, resolveAlert, addPublicReport, addProposal, upvoteProposal, updateProposalStatus 
+    }}>
       {children}
     </BlockchainContext.Provider>
   );

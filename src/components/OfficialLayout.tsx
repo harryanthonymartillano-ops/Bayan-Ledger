@@ -234,7 +234,25 @@ export const OfficialLayout = () => {
                 </div>
               )}
             </div>
-            <Link to="/" className="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors">
+            
+            {/* Wallet Connection */}
+            {useBlockchain().isWeb3Connected ? (
+              <div className="flex items-center gap-2 bg-emerald-50 px-3 py-1.5 rounded-full border border-emerald-200">
+                <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                <span className="text-xs font-mono text-emerald-800">
+                  {useBlockchain().walletAddress?.slice(0, 6)}...{useBlockchain().walletAddress?.slice(-4)}
+                </span>
+              </div>
+            ) : (
+              <button 
+                onClick={useBlockchain().connectToWeb3}
+                className="text-xs font-medium bg-slate-900 text-white px-3 py-1.5 rounded-md hover:bg-slate-800 transition-colors"
+              >
+                Connect Wallet
+              </button>
+            )}
+
+            <Link to="/" className="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors ml-2">
               View Public Site
             </Link>
           </div>

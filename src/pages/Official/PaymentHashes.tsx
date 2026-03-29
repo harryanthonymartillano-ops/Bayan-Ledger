@@ -9,7 +9,12 @@ export const PaymentHashes = () => {
   const { auditLogs } = useBlockchain();
 
   // Filter audit logs for transactions only
-  const transactionLogs = auditLogs.filter(log => log.action === 'Disbursement (NCA)' || log.action === 'Allocation (SARO)');
+  const transactionLogs = auditLogs.filter(log => 
+    log.action === 'Disbursement (NCA)' || 
+    log.action === 'Allocation (SARO)' ||
+    log.action === 'Funds Allocated' ||
+    log.action === 'Funds Disbursed'
+  );
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
