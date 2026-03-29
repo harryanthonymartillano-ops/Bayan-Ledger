@@ -57,7 +57,16 @@ export const MilestoneTracker = () => {
                     <Badge variant="outline" className="bg-slate-50">{m.percentage}%</Badge>
                   </TableCell>
                   <TableCell className="text-slate-500 text-sm">
-                    {m.dateVerified ? format(new Date(m.dateVerified), 'MMM d, yyyy') : '-'}
+                    {m.dateVerified ? (
+                      <div>
+                        <div>{format(new Date(m.dateVerified), 'MMM d, yyyy')}</div>
+                        {m.photoUrl && (
+                          <div className="text-[10px] font-mono text-slate-400 bg-slate-50 px-2 py-1 rounded border border-slate-100 truncate max-w-[150px] mt-1" title={m.photoUrl}>
+                            IPFS: {m.photoUrl.substring(0, 15)}...
+                          </div>
+                        )}
+                      </div>
+                    ) : '-'}
                   </TableCell>
                   <TableCell>
                     {m.status === 'Paid' ? (

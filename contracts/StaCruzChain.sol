@@ -35,6 +35,7 @@ contract StaCruzChain {
         string id;
         uint8 percentage;
         bool isVerified;
+        bool isPaid;
         string ipfsHash;
     }
 
@@ -48,7 +49,7 @@ contract StaCruzChain {
     event ProjectCreated(string projectId, string name, uint256 totalBudget, address indexed createdBy);
     event FundsAllocated(string projectId, uint256 amount, string saro, address indexed allocatedBy);
     event MilestoneVerified(string projectId, string milestoneId, string ipfsHash, address indexed verifiedBy);
-    event FundsDisbursed(string projectId, uint256 amount, address indexed disbursedBy);
+    event FundsDisbursed(string projectId, string milestoneId, uint256 amount, address indexed disbursedBy);
 
     constructor() {
         // The deployer is automatically granted the Admin role
@@ -113,6 +114,7 @@ contract StaCruzChain {
             id: _milestoneId,
             percentage: _percentage,
             isVerified: true,
+            isPaid: false,
             ipfsHash: _ipfsHash
         });
 
@@ -120,14 +122,23 @@ contract StaCruzChain {
     }
 
     /**
-     * @dev Treasurer disburses funds (NCA) after verifying the milestone
+     * @dev Treasurer disburses funds (NCA) after verifying the milestone and allocation
      */
-    function disburseFunds(string memory _projectId, uint256 _amount) external onlyRole(TREASURER_ROLE) {
+    function disburseFunds(string memory _projectId, string memory _milestoneId, uint256 _amount) external onlyRole(TREASURER_ROLE) {
         require(projects[_projectId].exists, "Project does not exist");
+        
+        // 1. Check if Budget Officer has allocated funds (SARO)
+        require(projects[_projectId].allocatedFunds > 0, "No funds allocated by Budget Officer");
         require(projects[_projectId].disbursedFunds + _amount <= projects[_projectId].allocatedFunds, "Exceeds allocated funds");
 
-        projects[_projectId].disbursedFunds += _amount;
+        // 2. Check if MPDC has verified the milestone
+        require(projectMilestones[_projectId][_milestoneId].isVerified, "Milestone not verified by MPDC");
+        require(!projectMilestones[_projectId][_milestoneId].isPaid, "Milestone already paid");
 
-        emit FundsDisbursed(_projectId, _amount, msg.sender);
+        // Execute Disbursement
+        projects[_projectId].disbursedFunds += _amount;
+        projectMilestones[_projectId][_milestoneId].isPaid = true;
+
+        emit FundsDisbursed(_projectId, _milestoneId, _amount, msg.sender);
     }
 }

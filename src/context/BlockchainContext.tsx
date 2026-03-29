@@ -94,7 +94,7 @@ interface BlockchainContextType {
   addMilestone: (projectId: string, milestone: Omit<Milestone, 'id'>) => void;
   verifyMilestone: (projectId: string, milestoneId: string, verifiedBy: string, photoUrl: string) => Promise<void>;
   addDocument: (projectId: string, document: Omit<Document, 'id'>) => void;
-  addTransaction: (projectId: string, transaction: Omit<Transaction, 'id' | 'hash' | 'projectId'>, saro?: string) => Promise<void>;
+  addTransaction: (projectId: string, transaction: Omit<Transaction, 'id' | 'hash' | 'projectId'>, saro?: string, milestoneId?: string) => Promise<void>;
   resolveAlert: (alertId: string) => void;
   addPublicReport: (projectId: string, message: string) => void;
   addProposal: (proposal: Omit<Proposal, 'id' | 'votes' | 'status' | 'createdAt'>) => void;
@@ -325,13 +325,13 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     if (isWeb3Connected && contract) {
       try {
         // Mocking the call since we don't have a real deployed contract
-        // const tx = await contract.createProject(projectId, projectData.name, projectData.totalBudget);
-        // await tx.wait();
-        // txHash = tx.hash;
-        console.log("Would call smart contract: createProject", projectId, projectData.name, projectData.totalBudget);
-      } catch (error) {
+        const tx = await contract.createProject(projectId, projectData.name, projectData.totalBudget);
+        await tx.wait();
+        txHash = tx.hash;
+        console.log("Called smart contract: createProject", projectId, projectData.name, projectData.totalBudget);
+      } catch (error: any) {
         console.error("Smart contract call failed:", error);
-        // Fallback to mock behavior for demo purposes
+        throw new Error(error.message || "Smart contract call failed");
       }
     }
 
@@ -389,12 +389,13 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     if (isWeb3Connected && contract) {
       try {
         // Mocking the call
-        // const tx = await contract.verifyMilestone(projectId, milestoneId, 100, "ipfsHashPlaceholder");
-        // await tx.wait();
-        // txHash = tx.hash;
-        console.log("Would call smart contract: verifyMilestone", projectId, milestoneId);
-      } catch (error) {
+        const tx = await contract.verifyMilestone(projectId, milestoneId, 100, photoUrl || "ipfsHashPlaceholder");
+        await tx.wait();
+        txHash = tx.hash;
+        console.log("Called smart contract: verifyMilestone", projectId, milestoneId);
+      } catch (error: any) {
         console.error("Smart contract call failed:", error);
+        throw new Error(error.message || "Smart contract call failed");
       }
     }
 
@@ -437,7 +438,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     logAction('Document Uploaded', 'Admin / HR', `Uploaded ${documentData.title} to project ${projectId}`, generateHash());
   };
 
-  const addTransaction = async (projectId: string, txData: Omit<Transaction, 'id' | 'hash' | 'projectId'>, saro?: string) => {
+  const addTransaction = async (projectId: string, txData: Omit<Transaction, 'id' | 'hash' | 'projectId'>, saro?: string, milestoneId?: string) => {
     const project = projects.find(p => p.id === projectId);
     if (!project) return;
 
@@ -457,18 +458,19 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     if (isWeb3Connected && contract) {
       try {
         if (txData.type === 'Allocation (SARO)') {
-          // const tx = await contract.allocateFunds(projectId, txData.amount, saro || "");
-          // await tx.wait();
-          // txHash = tx.hash;
-          console.log("Would call smart contract: allocateFunds", projectId, txData.amount, saro);
+          const tx = await contract.allocateFunds(projectId, txData.amount, saro || "");
+          await tx.wait();
+          txHash = tx.hash;
+          console.log("Called smart contract: allocateFunds", projectId, txData.amount, saro);
         } else if (txData.type === 'Disbursement (NCA)') {
-          // const tx = await contract.disburseFunds(projectId, txData.amount);
-          // await tx.wait();
-          // txHash = tx.hash;
-          console.log("Would call smart contract: disburseFunds", projectId, txData.amount);
+          const tx = await contract.disburseFunds(projectId, milestoneId || "", txData.amount);
+          await tx.wait();
+          txHash = tx.hash;
+          console.log("Called smart contract: disburseFunds", projectId, milestoneId, txData.amount);
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("Smart contract call failed:", error);
+        throw new Error(error.message || "Smart contract call failed");
       }
     }
 
@@ -494,7 +496,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
         }
 
         const updatedMilestones = p.milestones.map(m => {
-          if (txData.type === 'Disbursement (NCA)' && m.status === 'Verified') {
+          if (txData.type === 'Disbursement (NCA)' && m.status === 'Verified' && m.id === milestoneId) {
             return { ...m, status: 'Paid' as const };
           }
           return m;

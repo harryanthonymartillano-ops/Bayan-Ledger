@@ -6,7 +6,7 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
-import { MapPin, CheckCircle, Activity, Clock, Plus, FileText, FileCheck, FileSignature, Landmark, ArrowLeft, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { MapPin, CheckCircle, Activity, Clock, Plus, FileText, FileCheck, FileSignature, Landmark, ArrowLeft, AlertTriangle, ShieldCheck, Lock, ArrowRight, ArrowDown, Users } from 'lucide-react';
 import { format } from 'date-fns';
 
 export const Dashboard = () => {
@@ -106,7 +106,7 @@ export const Dashboard = () => {
                 recordedBy: user.id,
                 recordedByRole: user.role,
                 description: `SARO Allocation: ${formData.get('saro')}`,
-              }, formData.get('saro') as string);
+              }, formData.get('saro') as string, undefined);
               e.currentTarget.reset();
               alert('Funds locked and SARO recorded to blockchain successfully.');
             }}>
@@ -116,21 +116,50 @@ export const Dashboard = () => {
           </div>
         );
       case 'Treasurer':
-        if (project.status !== 'Milestone Verified') {
+        const isAllocated = project.allocatedFunds > 0;
+        const verifiedMilestone = project.milestones.find(m => m.status === 'Verified');
+        const saroTransaction = project.transactions.find(t => t.type === 'Allocation (SARO)');
+
+        if (!isAllocated || !verifiedMilestone) {
           return (
-            <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-lg text-center text-slate-500">
-              Waiting for MPDC to verify a milestone before funds can be disbursed.
+            <div className="mt-4 p-6 bg-slate-50 border border-slate-200 rounded-lg text-center">
+              <Lock className="w-8 h-8 mx-auto mb-3 text-slate-400" />
+              <h4 className="font-semibold text-slate-700 mb-1">Payment Locked by Smart Contract</h4>
+              <p className="text-sm text-slate-500 max-w-md mx-auto">
+                {!isAllocated && !verifiedMilestone ? "Waiting for Budget Officer (SARO) and MPDC (Milestone Verification)." :
+                 !isAllocated ? "Waiting for Budget Officer to allocate funds (SARO)." :
+                 "Waiting for MPDC to verify a milestone."}
+              </p>
             </div>
           );
         }
         
-        const verifiedMilestone = project.milestones.find(m => m.status === 'Verified');
-        const trancheAmount = verifiedMilestone ? (project.totalBudget * (verifiedMilestone.percentage / 100)) - project.disbursedFunds : 0;
+        const trancheAmount = (project.totalBudget * (verifiedMilestone.percentage / 100)) - project.disbursedFunds;
 
         return (
           <div className="mt-4 p-4 bg-emerald-50 border border-emerald-100 rounded-lg">
-            <h4 className="font-semibold text-emerald-900 mb-2 flex items-center"><Landmark className="w-4 h-4 mr-2" /> Fund Disbursement (NCA)</h4>
-            <p className="text-sm text-emerald-700 mb-4">MPDC has verified a milestone. Execute the NCA for this tranche.</p>
+            <h4 className="font-semibold text-emerald-900 mb-2 flex items-center"><Landmark className="w-4 h-4 mr-2" /> Final Verification & Execution (NCA)</h4>
+            <p className="text-sm text-emerald-700 mb-4">Verify the digital signatures from the Budget Office and MPDC before executing the final disbursement.</p>
+            
+            <div className="space-y-3 mb-4">
+              <div className="bg-white p-3 rounded border border-emerald-200 flex items-start gap-3">
+                <CheckCircle className="w-5 h-5 text-emerald-500 mt-0.5" />
+                <div>
+                  <div className="text-xs font-semibold text-slate-500 uppercase">Budget Officer Signature (SARO)</div>
+                  <div className="text-sm font-medium text-slate-900">{project.saro}</div>
+                  <div className="text-xs font-mono text-slate-400 truncate w-48 sm:w-auto">{saroTransaction?.hash || '0x...'}</div>
+                </div>
+              </div>
+              <div className="bg-white p-3 rounded border border-emerald-200 flex items-start gap-3">
+                <CheckCircle className="w-5 h-5 text-emerald-500 mt-0.5" />
+                <div>
+                  <div className="text-xs font-semibold text-slate-500 uppercase">MPDC Signature (Milestone)</div>
+                  <div className="text-sm font-medium text-slate-900">{verifiedMilestone.title} Verified</div>
+                  <div className="text-xs font-mono text-slate-400 truncate w-48 sm:w-auto">IPFS: {verifiedMilestone.photoUrl || 'Qm...'}</div>
+                </div>
+              </div>
+            </div>
+
             <form className="space-y-3" onSubmit={(e) => {
               e.preventDefault();
               const formData = new FormData(e.currentTarget);
@@ -143,8 +172,8 @@ export const Dashboard = () => {
                   date: new Date().toISOString(),
                   recordedBy: user.id,
                   recordedByRole: user.role,
-                  description: `NCA Disbursement for ${verifiedMilestone?.title}`,
-                });
+                  description: `NCA Disbursement for ${verifiedMilestone.title}`,
+                }, undefined, verifiedMilestone.id);
                 e.currentTarget.reset();
                 alert('NCA recorded and SHA-256 Hash generated successfully.');
               } catch (error: any) {
@@ -156,7 +185,7 @@ export const Dashboard = () => {
                 <div className="text-lg font-bold text-slate-900">{formatCurrency(trancheAmount)}</div>
               </div>
               <Input name="amount" type="number" min="1" defaultValue={trancheAmount} placeholder="Amount (PHP)" required />
-              <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700">Execute Disbursement</Button>
+              <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700">Execute Disbursement (Sign NCA)</Button>
             </form>
           </div>
         );
@@ -248,6 +277,9 @@ export const Dashboard = () => {
         );
       case 'Treasurer':
         const totalDisbursed = projects.reduce((acc, p) => acc + p.disbursedFunds, 0);
+        const totalAllocated = projects.reduce((acc, p) => acc + p.allocatedFunds, 0);
+        const availableLiquidity = totalAllocated - totalDisbursed;
+
         return (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <Card className="border-emerald-200 bg-emerald-50 shadow-sm">
@@ -259,29 +291,69 @@ export const Dashboard = () => {
                 <p className="text-xs text-emerald-600 mt-1">Released funds across all projects</p>
               </CardContent>
             </Card>
+            <Card className="border-blue-200 bg-blue-50 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-blue-800 uppercase tracking-wider">Available Liquidity</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-blue-900">{formatCurrency(availableLiquidity)}</div>
+                <p className="text-xs text-blue-600 mt-1">Allocated (SARO) minus Disbursed (NCA)</p>
+              </CardContent>
+            </Card>
           </div>
         );
       case 'Admin / HR':
         return (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <Card className="border-purple-200 bg-purple-50 shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-purple-800 uppercase tracking-wider">Active Users</CardTitle>
+          <div className="space-y-8 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Card className="border-purple-200 bg-purple-50 shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-purple-800 uppercase tracking-wider">Active Users</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold text-purple-900">4</div>
+                  <p className="text-xs text-purple-600 mt-1">Registered officials</p>
+                </CardContent>
+              </Card>
+              <Card className="border-slate-200 bg-white shadow-sm">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-slate-800 uppercase tracking-wider flex items-center">
+                    <AlertTriangle className="w-4 h-4 mr-2 text-amber-500" /> Active Alerts
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-3xl font-bold text-slate-900">{alerts.filter(a => a.status === 'Unresolved').length}</div>
+                  <p className="text-xs text-slate-500 mt-1">Requiring admin review</p>
+                </CardContent>
+              </Card>
+            </div>
+            
+            <Card className="border-slate-200 shadow-sm">
+              <CardHeader className="border-b border-slate-100 pb-4">
+                <CardTitle className="flex items-center"><Users className="w-5 h-5 mr-2" /> User Management & Wallet Mapping</CardTitle>
+                <CardDescription>Link physical personnel to blockchain wallet addresses for Role-Based Access Control (RBAC).</CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-purple-900">4</div>
-                <p className="text-xs text-purple-600 mt-1">Registered officials</p>
-              </CardContent>
-            </Card>
-            <Card className="border-slate-200 bg-white shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-slate-800 uppercase tracking-wider flex items-center">
-                  <AlertTriangle className="w-4 h-4 mr-2 text-amber-500" /> Active Alerts
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-slate-900">{alerts.filter(a => a.status === 'Unresolved').length}</div>
-                <p className="text-xs text-slate-500 mt-1">Requiring admin review</p>
+              <CardContent className="pt-6">
+                <div className="space-y-4">
+                  {[
+                    { role: 'MPDC (Planning)', name: 'Engr. Maria Santos', wallet: '0x71C...976F' },
+                    { role: 'Budget Officer', name: 'Mr. Jose Reyes', wallet: '0x3B2...1A4E' },
+                    { role: 'Treasurer', name: 'Mrs. Elena Cruz', wallet: '0x9F8...2D1C' },
+                  ].map((u, i) => (
+                    <div key={i} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                      <div className="mb-3 sm:mb-0">
+                        <div className="font-semibold text-slate-900">{u.role}</div>
+                        <div className="text-sm text-slate-500">{u.name}</div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-xs font-mono bg-white px-3 py-1.5 border border-slate-200 rounded text-slate-600">
+                          {u.wallet}
+                        </div>
+                        <Button variant="outline" size="sm" className="text-xs" onClick={() => window.location.href = '/official/users'}>Update Wallet</Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -307,32 +379,53 @@ export const Dashboard = () => {
         <div className="flex flex-col md:flex-row gap-4 justify-between">
           <div className={`flex-1 p-4 rounded-lg border ${isBudgetAllocated ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'}`}>
             <div className="flex items-center mb-2">
-              {isBudgetAllocated ? <CheckCircle className="w-5 h-5 text-emerald-500 mr-2" /> : <Clock className="w-5 h-5 text-slate-400 mr-2" />}
-              <span className={`font-medium ${isBudgetAllocated ? 'text-emerald-900' : 'text-slate-600'}`}>Budget Officer</span>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center mr-3 ${isBudgetAllocated ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                {isBudgetAllocated ? <CheckCircle className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
+              </div>
+              <div>
+                <h4 className="font-semibold text-slate-900 text-sm">Budget Officer</h4>
+                <p className="text-xs text-slate-500">SARO Allocation</p>
+              </div>
             </div>
-            <p className={`text-sm ${isBudgetAllocated ? 'text-emerald-700' : 'text-slate-500'}`}>
-              {isBudgetAllocated ? 'Allotted Funds (Digital Signature Found)' : 'Pending Allocation'}
-            </p>
+            {isBudgetAllocated && <p className="text-xs text-emerald-700 mt-2 font-medium">Funds locked on-chain</p>}
+          </div>
+
+          <div className={`flex items-center justify-center text-slate-300`}>
+            <ArrowRight className="w-6 h-6 hidden md:block" />
+            <ArrowDown className="w-6 h-6 block md:hidden" />
           </div>
 
           <div className={`flex-1 p-4 rounded-lg border ${isMilestoneVerified ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'}`}>
             <div className="flex items-center mb-2">
-              {isMilestoneVerified ? <CheckCircle className="w-5 h-5 text-emerald-500 mr-2" /> : <Clock className="w-5 h-5 text-slate-400 mr-2" />}
-              <span className={`font-medium ${isMilestoneVerified ? 'text-emerald-900' : 'text-slate-600'}`}>MPDC</span>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center mr-3 ${isMilestoneVerified ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                {isMilestoneVerified ? <CheckCircle className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
+              </div>
+              <div>
+                <h4 className="font-semibold text-slate-900 text-sm">MPDC</h4>
+                <p className="text-xs text-slate-500">Milestone Verification</p>
+              </div>
             </div>
-            <p className={`text-sm ${isMilestoneVerified ? 'text-emerald-700' : 'text-slate-500'}`}>
-              {isMilestoneVerified ? 'Verified Milestone (Digital Signature Found)' : 'Pending Verification'}
-            </p>
+            {isMilestoneVerified && <p className="text-xs text-emerald-700 mt-2 font-medium">Work verified on-chain</p>}
           </div>
 
-          <div className={`flex-1 p-4 rounded-lg border ${isFullyPaid ? 'bg-emerald-50 border-emerald-200' : isPaymentPending ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+          <div className={`flex items-center justify-center text-slate-300`}>
+            <ArrowRight className="w-6 h-6 hidden md:block" />
+            <ArrowDown className="w-6 h-6 block md:hidden" />
+          </div>
+
+          <div className={`flex-1 p-4 rounded-lg border ${isFullyPaid ? 'bg-emerald-50 border-emerald-200' : isPartiallyPaid ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'}`}>
             <div className="flex items-center mb-2">
-              {isFullyPaid ? <CheckCircle className="w-5 h-5 text-emerald-500 mr-2" /> : isPaymentPending ? <AlertTriangle className="w-5 h-5 text-amber-500 mr-2" /> : <Clock className="w-5 h-5 text-slate-400 mr-2" />}
-              <span className={`font-medium ${isFullyPaid ? 'text-emerald-900' : isPaymentPending ? 'text-amber-900' : 'text-slate-600'}`}>Treasurer</span>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center mr-3 ${isFullyPaid ? 'bg-emerald-100 text-emerald-600' : isPartiallyPaid ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400'}`}>
+                {isFullyPaid ? <CheckCircle className="w-5 h-5" /> : isPartiallyPaid ? <CheckCircle className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
+              </div>
+              <div>
+                <h4 className="font-semibold text-slate-900 text-sm">Treasurer</h4>
+                <p className="text-xs text-slate-500">NCA Execution</p>
+              </div>
             </div>
-            <p className={`text-sm ${isFullyPaid ? 'text-emerald-700' : isPaymentPending ? 'text-amber-700' : 'text-slate-500'}`}>
-              {isFullyPaid ? 'Fully Paid (Digital Signature Found)' : isPartiallyPaid ? 'Partially Paid (Pending Signatures)' : isPaymentPending ? 'Payment Pending (Waiting for Signature)' : 'Pending Payment'}
-            </p>
+            {isFullyPaid && <p className="text-xs text-emerald-700 mt-2 font-medium">Fully disbursed</p>}
+            {isPartiallyPaid && <p className="text-xs text-blue-700 mt-2 font-medium">Partially disbursed</p>}
+            {!isFullyPaid && !isPartiallyPaid && <p className="text-xs text-slate-500 mt-2">Awaiting prior signatures</p>}
           </div>
         </div>
       </div>
@@ -547,9 +640,9 @@ export const Dashboard = () => {
                 <h3 className="text-xl font-semibold mb-4 text-slate-900">Project Milestones</h3>
                 <div className="space-y-4">
                   {projects.find(p => p.id === selectedProject)?.milestones.map(m => (
-                    <div key={m.id} className="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-lg shadow-sm">
+                    <div key={m.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-white border border-slate-200 rounded-lg shadow-sm gap-4">
                       <div>
-                        <div className="flex items-center gap-2 mb-1">
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
                           <h4 className="font-semibold text-slate-900">{m.title}</h4>
                           <Badge variant="outline" className="bg-slate-50">{m.percentage}%</Badge>
                           {m.status === 'Verified' && <Badge className="bg-purple-500">Verified</Badge>}
@@ -559,8 +652,15 @@ export const Dashboard = () => {
                         <p className="text-sm text-slate-500">{m.description}</p>
                       </div>
                       {m.dateVerified && (
-                        <div className="text-right text-xs text-slate-400">
-                          Verified: {safeFormatDate(m.dateVerified, 'MMM dd, yyyy')}
+                        <div className="text-left sm:text-right">
+                          <div className="text-xs text-slate-500 mb-1">
+                            Verified: {safeFormatDate(m.dateVerified, 'MMM dd, yyyy')}
+                          </div>
+                          {m.photoUrl && (
+                            <div className="text-[10px] font-mono text-slate-400 bg-slate-50 px-2 py-1 rounded border border-slate-100 truncate max-w-[200px]" title={m.photoUrl}>
+                              IPFS: {m.photoUrl.substring(0, 20)}...
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
