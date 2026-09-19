@@ -15,13 +15,15 @@ export const MyTasks = () => {
   const renderTasks = () => {
     switch (user.role) {
       case 'MPDC (Planning)':
-        const pendingMilestones = projects.flatMap(p => 
-          p.milestones.filter(m => m.status === 'Pending').map(m => ({ project: p, milestone: m }))
+        const pendingMilestones = projects.flatMap(p =>
+          p.allocatedFunds > 0
+            ? p.milestones.filter(m => m.status === 'Pending').map(m => ({ project: p, milestone: m }))
+            : []
         );
         return (
           <div className="space-y-4">
             {pendingMilestones.length === 0 ? (
-              <p className="text-slate-500">No pending milestones to verify.</p>
+              <p className="text-slate-500">No allocated projects have pending milestones to verify.</p>
             ) : (
               pendingMilestones.map((item, idx) => (
                 <Card key={idx} className="border-slate-200">
@@ -30,7 +32,7 @@ export const MyTasks = () => {
                       <h4 className="font-semibold text-slate-900">{item.project.name}</h4>
                       <p className="text-sm text-slate-500">{item.milestone.title}</p>
                     </div>
-                    <Link to="/official/dashboard" className="text-blue-600 hover:underline text-sm font-medium">
+                    <Link to={`/official/dashboard?projectId=${item.project.id}`} className="text-blue-600 hover:underline text-sm font-medium">
                       Verify Now
                     </Link>
                   </CardContent>
@@ -65,7 +67,7 @@ export const MyTasks = () => {
         );
 
       case 'Treasurer':
-        const pendingPayments = projects.filter(p => 
+        const pendingPayments = projects.filter(p =>
           p.milestones.some(m => m.status === 'Verified') && p.disbursedFunds < p.allocatedFunds
         );
         return (
@@ -89,8 +91,7 @@ export const MyTasks = () => {
             )}
           </div>
         );
-
-      case 'Admin / HR':
+      case 'Admin':
         const unresolvedAlerts = alerts.filter(a => a.status === 'Unresolved');
         return (
           <div className="space-y-4">
@@ -118,18 +119,18 @@ export const MyTasks = () => {
         );
 
       default:
-        return <p>No specific tasks for this role.</p>;
+        return <p className="text-slate-500 text-sm">No specific tasks for this role.</p>;
     }
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-slate-900 sm:text-4xl tracking-tight flex items-center">
-          <CheckSquare className="h-8 w-8 mr-3 text-blue-600" />
+    <div className="max-w-7xl mx-auto pb-8">
+      <div className="mb-5">
+        <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight flex items-center">
+          <CheckSquare className="h-7 w-7 mr-2.5 text-blue-600" />
           My Tasks
         </h1>
-        <p className="mt-2 text-lg text-slate-600">
+        <p className="mt-1 text-sm text-slate-600">
           Action items requiring your attention as {user.role}.
         </p>
       </div>

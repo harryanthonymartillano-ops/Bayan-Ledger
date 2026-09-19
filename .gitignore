@@ -1,8 +1,32 @@
+# Dependencies
 node_modules/
-build/
+backend/node_modules/
+
+# Production & Build outputs
 dist/
+backend/dist/
+build/
 coverage/
-.DS_Store
+
+# Hardhat artifacts & cache
+artifacts/
+cache/
+
+# Uploads & local storage (prevent bloating repo with uploaded PDFs and images)
+backend/uploads/
+uploads/
+
+# Logs
 *.log
+logs/
+backend/logs/
+
+# Environment files & secrets
 .env*
 !.env.example
+!backend/.env.example
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.vscode/

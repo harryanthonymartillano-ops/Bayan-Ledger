@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-background: #ffffff;
   --color-foreground: #020817;
@@ -23,8 +25,518 @@
   --radius: 0.5rem;
 }
 
+.dark {
+  --color-background: #0c0e14;
+  --color-foreground: #f8fafc;
+  --color-card: #121520;
+  --color-card-foreground: #f8fafc;
+  --color-popover: #121520;
+  --color-popover-foreground: #f8fafc;
+  --color-primary: #3b82f6;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #181c2b;
+  --color-secondary-foreground: #f8fafc;
+  --color-muted: #181c2b;
+  --color-muted-foreground: #8c97ab;
+  --color-accent: #181c2b;
+  --color-accent-foreground: #f8fafc;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #1e2334;
+  --color-input: #1e2334;
+  --color-ring: #3b82f6;
+  color-scheme: dark;
+}
+
+/* Scoped Official Portal Dark Mode Adaptation (paios-classroom.com inspired) */
+.dark .official-portal,
+.official-portal.dark {
+  background-color: #0c0e14;
+  color: #f8fafc;
+}
+
+.dark .official-portal .bg-white,
+.official-portal.dark .bg-white {
+  background-color: #121520;
+}
+
+.dark .official-portal .bg-slate-50,
+.official-portal.dark .bg-slate-50,
+.dark .official-portal [class*="bg-slate-50/"],
+.official-portal.dark [class*="bg-slate-50/"] {
+  background-color: #141824 !important;
+}
+
+.dark .official-portal .bg-slate-100,
+.official-portal.dark .bg-slate-100 {
+  background-color: #181c2b;
+}
+
+.dark .official-portal [class*="from-white"],
+.official-portal.dark [class*="from-white"] {
+  --tw-gradient-from: #121520 var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: #121520 var(--tw-gradient-to-position) !important;
+  --tw-gradient-stops: var(--tw-gradient-from), #141824 var(--tw-gradient-via-position), #161c2b var(--tw-gradient-to-position) !important;
+}
+
+.dark .official-portal .border-slate-200,
+.official-portal.dark .border-slate-200 {
+  border-color: #1e2334;
+}
+
+.dark .official-portal .border-slate-100,
+.official-portal.dark .border-slate-100 {
+  border-color: #1a1e2d;
+}
+
+.dark .official-portal .border-slate-300,
+.official-portal.dark .border-slate-300 {
+  border-color: #293047;
+}
+
+.dark .official-portal .text-slate-950,
+.official-portal.dark .text-slate-950 {
+  color: #f8fafc !important;
+}
+
+.dark .official-portal .text-slate-900,
+.official-portal.dark .text-slate-900 {
+  color: #f8fafc;
+}
+
+.dark .official-portal .text-slate-800,
+.official-portal.dark .text-slate-800 {
+  color: #f1f5f9;
+}
+
+.dark .official-portal .text-slate-700,
+.official-portal.dark .text-slate-700 {
+  color: #e2e8f0;
+}
+
+.dark .official-portal .text-slate-600,
+.official-portal.dark .text-slate-600 {
+  color: #cbd5e1;
+}
+
+.dark .official-portal .text-slate-500,
+.official-portal.dark .text-slate-500 {
+  color: #94a3b8;
+}
+
+.dark .official-portal .text-slate-400,
+.official-portal.dark .text-slate-400 {
+  color: #94a3b8;
+}
+
+/* Official Portal Table Row & Interactive Item Hover Highlights (Dark Mode) */
+.dark .official-portal table tbody tr:not([class*="bg-red"]):not([class*="bg-rose"]):not([class*="hover:bg-red"]):not([class*="hover:bg-rose"]):hover,
+.official-portal.dark table tbody tr:not([class*="bg-red"]):not([class*="bg-rose"]):not([class*="hover:bg-red"]):not([class*="hover:bg-rose"]):hover,
+.dark .official-portal [data-slot="table-row"]:hover,
+.official-portal.dark [data-slot="table-row"]:hover,
+.dark .official-portal [class*="hover:bg-slate-50"]:hover,
+.official-portal.dark [class*="hover:bg-slate-50"]:hover,
+.dark .official-portal [class*="hover:bg-gray-50"]:hover,
+.official-portal.dark [class*="hover:bg-gray-50"]:hover,
+.dark .official-portal [class*="hover:bg-muted"]:hover,
+.official-portal.dark [class*="hover:bg-muted"]:hover {
+  background-color: #181c2b !important;
+}
+
+.dark .official-portal [class*="hover:bg-slate-100"]:hover,
+.official-portal.dark [class*="hover:bg-slate-100"]:hover,
+.dark .official-portal [class*="hover:bg-slate-200"]:hover,
+.official-portal.dark [class*="hover:bg-slate-200"]:hover,
+.dark .official-portal [class*="hover:bg-gray-100"]:hover,
+.official-portal.dark [class*="hover:bg-gray-100"]:hover,
+.dark .official-portal [class*="hover:bg-gray-200"]:hover,
+.official-portal.dark [class*="hover:bg-gray-200"]:hover {
+  background-color: #1e2334 !important;
+}
+
+.dark .official-portal [class*="hover:bg-white"]:hover,
+.official-portal.dark [class*="hover:bg-white"]:hover {
+  background-color: #1e2334 !important;
+  color: #f8fafc !important;
+}
+
+/* Red / critical row and button hovers */
+.dark .official-portal table tbody tr[class*="bg-red"]:hover,
+.official-portal.dark table tbody tr[class*="bg-red"]:hover,
+.dark .official-portal table tbody tr[class*="hover:bg-red"]:hover,
+.official-portal.dark table tbody tr[class*="hover:bg-red"]:hover,
+.dark .official-portal [class*="hover:bg-red-100"]:hover,
+.official-portal.dark [class*="hover:bg-red-100"]:hover,
+.dark .official-portal [class*="hover:bg-rose-100"]:hover,
+.official-portal.dark [class*="hover:bg-rose-100"]:hover {
+  background-color: rgba(239, 68, 68, 0.22) !important;
+}
+
+/* Blue action / info button and link hovers */
+.dark .official-portal [class*="hover:bg-blue-100"]:hover,
+.official-portal.dark [class*="hover:bg-blue-100"]:hover,
+.dark .official-portal [class*="hover:bg-sky-100"]:hover,
+.official-portal.dark [class*="hover:bg-sky-100"]:hover {
+  background-color: rgba(59, 130, 246, 0.28) !important;
+}
+
+/* Emerald / Green button and badge hovers */
+.dark .official-portal [class*="hover:bg-emerald-100"]:hover,
+.official-portal.dark [class*="hover:bg-emerald-100"]:hover,
+.dark .official-portal [class*="hover:bg-green-100"]:hover,
+.official-portal.dark [class*="hover:bg-green-100"]:hover {
+  background-color: rgba(16, 185, 129, 0.28) !important;
+}
+
+/* Amber / Warning button and badge hovers */
+.dark .official-portal [class*="hover:bg-amber-100"]:hover,
+.official-portal.dark [class*="hover:bg-amber-100"]:hover,
+.dark .official-portal [class*="hover:bg-yellow-100"]:hover,
+.official-portal.dark [class*="hover:bg-yellow-100"]:hover {
+  background-color: rgba(245, 158, 11, 0.28) !important;
+}
+
+/* Purple button and badge hovers */
+.dark .official-portal [class*="hover:bg-purple-100"]:hover,
+.official-portal.dark [class*="hover:bg-purple-100"]:hover,
+.dark .official-portal [class*="hover:bg-violet-100"]:hover,
+.official-portal.dark [class*="hover:bg-violet-100"]:hover {
+  background-color: rgba(168, 85, 247, 0.28) !important;
+}
+
+/* Ensure text inside hovered rows or buttons stays crisp, legible and bright */
+.dark .official-portal [class*="hover:text-slate-800"]:hover,
+.official-portal.dark [class*="hover:text-slate-800"]:hover,
+.dark .official-portal [class*="hover:text-slate-900"]:hover,
+.official-portal.dark [class*="hover:text-slate-900"]:hover,
+.dark .official-portal [class*="hover:text-slate-700"]:hover,
+.official-portal.dark [class*="hover:text-slate-700"]:hover {
+  color: #ffffff !important;
+}
+
+.dark .official-portal [class*="hover:text-blue-800"]:hover,
+.official-portal.dark [class*="hover:text-blue-800"]:hover,
+.dark .official-portal [class*="hover:text-blue-700"]:hover,
+.official-portal.dark [class*="hover:text-blue-700"]:hover {
+  color: #93c5fd !important;
+}
+
+.dark .official-portal [class*="hover:text-red-800"]:hover,
+.official-portal.dark [class*="hover:text-red-800"]:hover {
+  color: #fca5a5 !important;
+}
+
+.dark .official-portal [class*="hover:text-emerald-800"]:hover,
+.official-portal.dark [class*="hover:text-emerald-800"]:hover {
+  color: #6ee7b7 !important;
+}
+
+/* Official Portal Highlight Card and Badge Dark Mode Adaptations (supports opacity variants like /40, /80) */
+
+/* Amber / Warning Highlights */
+.dark .official-portal [class*="bg-amber-50"],
+.official-portal.dark [class*="bg-amber-50"],
+.dark .official-portal [class*="bg-yellow-50"],
+.official-portal.dark [class*="bg-yellow-50"],
+.dark .official-portal [class*="bg-amber-100"],
+.official-portal.dark [class*="bg-amber-100"],
+.dark .official-portal [class*="bg-yellow-100"],
+.official-portal.dark [class*="bg-yellow-100"] {
+  background-color: rgba(245, 158, 11, 0.16) !important;
+}
+
+.dark .official-portal [class*="border-amber-200"],
+.official-portal.dark [class*="border-amber-200"],
+.dark .official-portal [class*="border-amber-300"],
+.official-portal.dark [class*="border-amber-300"],
+.dark .official-portal [class*="border-yellow-200"],
+.official-portal.dark [class*="border-yellow-200"],
+.dark .official-portal [class*="border-yellow-300"],
+.official-portal.dark [class*="border-yellow-300"] {
+  border-color: rgba(245, 158, 11, 0.35) !important;
+}
+
+.dark .official-portal [class*="text-amber-700"],
+.official-portal.dark [class*="text-amber-700"],
+.dark .official-portal [class*="text-amber-800"],
+.official-portal.dark [class*="text-amber-800"],
+.dark .official-portal [class*="text-amber-900"],
+.official-portal.dark [class*="text-amber-900"],
+.dark .official-portal [class*="text-amber-950"],
+.official-portal.dark [class*="text-amber-950"],
+.dark .official-portal [class*="text-yellow-700"],
+.official-portal.dark [class*="text-yellow-700"],
+.dark .official-portal [class*="text-yellow-800"],
+.official-portal.dark [class*="text-yellow-800"] {
+  color: #fbbf24 !important;
+}
+
+/* Red / Danger / Critical Highlights */
+.dark .official-portal [class*="bg-red-50"],
+.official-portal.dark [class*="bg-red-50"],
+.dark .official-portal [class*="bg-rose-50"],
+.official-portal.dark [class*="bg-rose-50"],
+.dark .official-portal [class*="bg-red-100"],
+.official-portal.dark [class*="bg-red-100"],
+.dark .official-portal [class*="bg-rose-100"],
+.official-portal.dark [class*="bg-rose-100"] {
+  background-color: rgba(239, 68, 68, 0.16) !important;
+}
+
+.dark .official-portal [class*="border-red-200"],
+.official-portal.dark [class*="border-red-200"],
+.dark .official-portal [class*="border-red-300"],
+.official-portal.dark [class*="border-red-300"],
+.dark .official-portal [class*="border-rose-200"],
+.official-portal.dark [class*="border-rose-200"] {
+  border-color: rgba(239, 68, 68, 0.35) !important;
+}
+
+.dark .official-portal [class*="text-red-700"],
+.official-portal.dark [class*="text-red-700"],
+.dark .official-portal [class*="text-red-800"],
+.official-portal.dark [class*="text-red-800"],
+.dark .official-portal [class*="text-red-900"],
+.official-portal.dark [class*="text-red-900"],
+.dark .official-portal [class*="text-red-950"],
+.official-portal.dark [class*="text-red-950"] {
+  color: #f87171 !important;
+}
+
+/* Emerald / Green Highlights */
+.dark .official-portal [class*="bg-emerald-50"],
+.official-portal.dark [class*="bg-emerald-50"],
+.dark .official-portal [class*="bg-green-50"],
+.official-portal.dark [class*="bg-green-50"],
+.dark .official-portal [class*="bg-emerald-100"],
+.official-portal.dark [class*="bg-emerald-100"],
+.dark .official-portal [class*="bg-green-100"],
+.official-portal.dark [class*="bg-green-100"] {
+  background-color: rgba(16, 185, 129, 0.16) !important;
+}
+
+.dark .official-portal [class*="border-emerald-200"],
+.official-portal.dark [class*="border-emerald-200"],
+.dark .official-portal [class*="border-emerald-300"],
+.official-portal.dark [class*="border-emerald-300"],
+.dark .official-portal [class*="border-green-200"],
+.official-portal.dark [class*="border-green-200"] {
+  border-color: rgba(16, 185, 129, 0.35) !important;
+}
+
+.dark .official-portal [class*="text-emerald-700"],
+.official-portal.dark [class*="text-emerald-700"],
+.dark .official-portal [class*="text-emerald-800"],
+.official-portal.dark [class*="text-emerald-800"],
+.dark .official-portal [class*="text-emerald-900"],
+.official-portal.dark [class*="text-emerald-900"],
+.dark .official-portal [class*="text-emerald-950"],
+.official-portal.dark [class*="text-emerald-950"],
+.dark .official-portal [class*="text-green-700"],
+.official-portal.dark [class*="text-green-700"],
+.dark .official-portal [class*="text-green-800"],
+.official-portal.dark [class*="text-green-800"],
+.dark .official-portal [class*="text-green-900"],
+.official-portal.dark [class*="text-green-900"] {
+  color: #34d399 !important;
+}
+
+/* Blue / Info Highlights */
+.dark .official-portal [class*="bg-blue-50"],
+.official-portal.dark [class*="bg-blue-50"],
+.dark .official-portal [class*="bg-sky-50"],
+.official-portal.dark [class*="bg-sky-50"],
+.dark .official-portal [class*="bg-blue-100"],
+.official-portal.dark [class*="bg-blue-100"],
+.dark .official-portal [class*="bg-sky-100"],
+.official-portal.dark [class*="bg-sky-100"] {
+  background-color: rgba(59, 130, 246, 0.16) !important;
+}
+
+.dark .official-portal [class*="border-blue-200"],
+.official-portal.dark [class*="border-blue-200"],
+.dark .official-portal [class*="border-blue-300"],
+.official-portal.dark [class*="border-blue-300"] {
+  border-color: rgba(59, 130, 246, 0.35) !important;
+}
+
+.dark .official-portal [class*="text-blue-700"],
+.official-portal.dark [class*="text-blue-700"],
+.dark .official-portal [class*="text-blue-800"],
+.official-portal.dark [class*="text-blue-800"],
+.dark .official-portal [class*="text-blue-900"],
+.official-portal.dark [class*="text-blue-900"],
+.dark .official-portal [class*="text-blue-950"],
+.official-portal.dark [class*="text-blue-950"] {
+  color: #60a5fa !important;
+}
+
+/* Purple Highlights */
+.dark .official-portal [class*="bg-purple-50"],
+.official-portal.dark [class*="bg-purple-50"],
+.dark .official-portal [class*="bg-purple-100"],
+.official-portal.dark [class*="bg-purple-100"],
+.dark .official-portal [class*="bg-violet-50"],
+.official-portal.dark [class*="bg-violet-50"],
+.dark .official-portal [class*="bg-violet-100"],
+.official-portal.dark [class*="bg-violet-100"] {
+  background-color: rgba(168, 85, 247, 0.16) !important;
+}
+
+.dark .official-portal [class*="border-purple-200"],
+.official-portal.dark [class*="border-purple-200"],
+.dark .official-portal [class*="border-purple-300"],
+.official-portal.dark [class*="border-purple-300"] {
+  border-color: rgba(168, 85, 247, 0.35) !important;
+}
+
+.dark .official-portal [class*="text-purple-700"],
+.official-portal.dark [class*="text-purple-700"],
+.dark .official-portal [class*="text-purple-800"],
+.official-portal.dark [class*="text-purple-800"],
+.dark .official-portal [class*="text-purple-900"],
+.official-portal.dark [class*="text-purple-900"],
+.dark .official-portal [class*="text-purple-950"],
+.official-portal.dark [class*="text-purple-950"] {
+  color: #c084fc !important;
+}
+
+/* Official Portal Table Guard */
+.dark .official-portal thead tr,
+.dark .official-portal thead th {
+  background-color: #151926 !important;
+  color: #cbd5e1 !important;
+  border-color: #1e2334 !important;
+}
+
+.dark .official-portal tbody tr,
+.official-portal.dark tbody tr {
+  border-color: #1e2334 !important;
+}
+
+.dark .official-portal tbody tr td,
+.official-portal.dark tbody tr td {
+  border-color: #1e2334 !important;
+}
+
+/* Recharts Dark Mode Styling */
+.dark .official-portal .recharts-cartesian-grid-horizontal line,
+.dark .official-portal .recharts-cartesian-grid-vertical line,
+.official-portal.dark .recharts-cartesian-grid-horizontal line,
+.official-portal.dark .recharts-cartesian-grid-vertical line {
+  stroke: #1e2334 !important;
+}
+
+.dark .official-portal .recharts-text,
+.dark .official-portal .recharts-cartesian-axis-tick-value,
+.dark .official-portal .recharts-cartesian-axis-tick text,
+.official-portal.dark .recharts-text,
+.official-portal.dark .recharts-cartesian-axis-tick-value,
+.official-portal.dark .recharts-cartesian-axis-tick text {
+  fill: #94a3b8 !important;
+  color: #94a3b8 !important;
+}
+
+.dark .official-portal .recharts-default-tooltip,
+.official-portal.dark .recharts-default-tooltip {
+  background-color: #121520 !important;
+  border-color: #1e2334 !important;
+  color: #f8fafc !important;
+  border-radius: 0.75rem !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
+}
+
+.dark .official-portal .recharts-tooltip-label,
+.official-portal.dark .recharts-tooltip-label {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+}
+
+.dark .official-portal .recharts-legend-item-text,
+.official-portal.dark .recharts-legend-item-text {
+  color: #cbd5e1 !important;
+}
+
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
   font-family: 'Inter', system-ui, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+[data-scroll-root] {
+  scroll-behavior: smooth;
+}
+
+.page-transition {
+  animation: page-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: opacity, transform;
+}
+
+.official-view-transition {
+  animation: official-view-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: opacity, transform;
+}
+
+.official-detail-enter {
+  animation: official-detail-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes official-view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes official-detail-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  html,
+  [data-scroll-root] {
+    scroll-behavior: auto;
+  }
+
+  .page-transition {
+    animation: none;
+  }
+
+  .official-view-transition {
+    animation: none;
+  }
+
+  .official-detail-enter {
+    animation: none;
+  }
 }

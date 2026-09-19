@@ -7,13 +7,15 @@ import { Badge } from '../../components/ui/badge';
 import { format } from 'date-fns';
 
 export const VerifiedPayments = () => {
-  const { projects } = useBlockchain();
+  const { projects, processPayment } = useBlockchain();
 
-  // Find milestones that are verified but not yet paid
-  const pendingPayments = projects.flatMap(p => 
-    p.milestones
-      .filter(m => m.status === 'Verified')
-      .map(m => ({ ...m, projectId: p.id, projectName: p.name, allocated: p.allocatedFunds, disbursed: p.disbursedFunds }))
+  // Treasurer sees only SARO-allocated projects and MPDC-verified milestones.
+  const pendingPayments = projects.flatMap(p =>
+    p.saro
+      ? p.milestones
+        .filter(m => m.status === 'Verified' && !!m.verifiedBy)
+        .map(m => ({ ...m, projectId: p.id, projectName: p.name, allocated: p.allocatedFunds, disbursed: p.disbursedFunds, saro: p.saro }))
+      : []
   );
 
   return (
@@ -47,9 +49,9 @@ export const VerifiedPayments = () => {
             <TableBody>
               {pendingPayments.map((m) => {
                 // Estimate amount due based on percentage
-                const amountDue = (m.allocated * (m.percentage / 100));
+                const amountDue = Math.max(0, (m.allocated * (m.percentage / 100)) - m.disbursed);
                 return (
-                  <TableRow key={m.id} className="hover:bg-slate-50">
+                  <TableRow key={m.id} className="hover:bg-slate-50 dark:hover:bg-[#181c2b] transition-colors border-b border-slate-100 dark:border-[#1e2334]">
                     <TableCell>
                       <div className="font-medium text-slate-900">{m.projectName}</div>
                       <div className="font-mono text-xs text-slate-500">{m.projectId}</div>
@@ -65,7 +67,17 @@ export const VerifiedPayments = () => {
                       ₱{amountDue.toLocaleString()}
                     </TableCell>
                     <TableCell className="text-right">
-                      <button className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-colors">
+                      <button
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-md text-sm font-medium transition-colors"
+                        onClick={async () => {
+                          try {
+                            await processPayment(m.projectId, m.id);
+                            alert('Disbursement executed successfully.');
+                          } catch (error: any) {
+                            alert(error?.message || 'Disbursement blocked by blockchain.');
+                          }
+                        }}
+                      >
                         Process Payment
                       </button>
                     </TableCell>
