@@ -92,14 +92,32 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/auth', authRoutes);
+app.use('/auth', authRoutes);
+
 app.use('/api/projects', projectRoutes);
+app.use('/projects', projectRoutes);
+
 app.use('/api/milestones', milestoneRoutes);
+app.use('/milestones', milestoneRoutes);
+
 app.use('/api/transactions', transactionRoutes);
+app.use('/transactions', transactionRoutes);
+
 app.use('/api/documents', documentRoutes);
+app.use('/documents', documentRoutes);
+
 app.use('/api/audit-logs', auditLogRoutes);
+app.use('/audit-logs', auditLogRoutes);
+
 app.use('/api/blockchain', blockchainRoutes);
+app.use('/blockchain', blockchainRoutes);
+
 app.use('/api/system-alerts', systemAlertRoutes);
+app.use('/system-alerts', systemAlertRoutes);
+
 app.use('/api/notifications', notificationRoutes);
+app.use('/notifications', notificationRoutes);
+
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logger.error('Unhandled backend error:', err);

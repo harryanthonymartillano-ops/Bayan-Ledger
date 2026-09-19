@@ -1,4 +1,17 @@
-export const API_BASE_URL = (import.meta as any).env?.VITE_API_BASE_URL || (import.meta as any).env?.VITE_API_URL || 'http://localhost:5000/api';
+const resolveApiBaseUrl = (): string => {
+  const envUrl =
+    (import.meta as any).env?.VITE_API_BASE_URL ||
+    (import.meta as any).env?.VITE_API_URL ||
+    'http://localhost:5000/api';
+
+  let cleanUrl = String(envUrl).trim().replace(/\/+$/, '');
+  if (!cleanUrl.endsWith('/api')) {
+    cleanUrl = `${cleanUrl}/api`;
+  }
+  return cleanUrl;
+};
+
+export const API_BASE_URL = resolveApiBaseUrl();
 
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
