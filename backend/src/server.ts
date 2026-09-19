@@ -18,8 +18,25 @@ import notificationRoutes from './routes/notifications';
 
 config();
 
+function resolvePort(rawPort: string | undefined, defaultPort = 5000): number {
+  if (!rawPort) return defaultPort;
+  const trimmed = String(rawPort).trim();
+  const direct = parseInt(trimmed, 10);
+  if (!Number.isNaN(direct) && direct >= 0 && direct < 65536 && String(direct) === trimmed) {
+    return direct;
+  }
+  // Strip non-numeric characters in case value was formatted like "PORT=5000" or '"5000"'
+  const digits = trimmed.replace(/[^0-9]/g, '');
+  const extracted = parseInt(digits, 10);
+  if (!Number.isNaN(extracted) && extracted >= 0 && extracted < 65536) {
+    return extracted;
+  }
+  return defaultPort;
+}
+
+const rawPort = process.env.PORT;
+const port = resolvePort(rawPort, 5000);
 const app = express();
-const port = Number(process.env.PORT || 5000);
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   process.env.FRONTEND_PRODUCTION_URL,
@@ -73,8 +90,8 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 initializeDatabase()
   .then(() => {
     app.listen(port, () => {
-      logger.info(`Backend API listening on port ${port}`);
-      console.log(`Backend API listening on http://localhost:${port}`);
+      logger.info(`Backend API listening on port ${port} (raw PORT: ${JSON.stringify(rawPort)})`);
+      console.log(`Backend API listening on port ${port} (raw PORT: ${JSON.stringify(rawPort)})`);
     });
   })
   .catch((error) => {
