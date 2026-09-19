@@ -62,6 +62,27 @@ app.use('/uploads', (_req, res, next) => {
 });
 app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
 
+app.get('/', (_req, res) => {
+  res.json({
+    name: 'BayanLedger Backend API',
+    status: 'online',
+    version: '1.0.0',
+    health: '/health',
+    endpoints: {
+      auth: '/api/auth',
+      projects: '/api/projects',
+      milestones: '/api/milestones',
+      transactions: '/api/transactions',
+      documents: '/api/documents',
+      auditLogs: '/api/audit-logs',
+      blockchain: '/api/blockchain',
+      systemAlerts: '/api/system-alerts',
+      notifications: '/api/notifications',
+    },
+    message: 'Backend service is operational.',
+  });
+});
+
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
