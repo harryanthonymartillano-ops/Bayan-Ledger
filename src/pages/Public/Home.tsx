@@ -43,7 +43,7 @@ export const Home = () => {
       maximumFractionDigits: 1,
     }).format(amount);
 
-  const isDataLoading = isLoading || projects.length === 0;
+  const isDataLoading = isLoading && projects.length === 0;
 
   const portalStats = [
     {

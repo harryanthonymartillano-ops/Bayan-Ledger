@@ -443,8 +443,8 @@ export const AuditLogs = () => {
                     key={page}
                     onClick={() => setCurrentPage(page)}
                     className={`h-9 min-w-9 rounded-lg px-3 text-sm font-bold transition-colors ${currentPage === page
-                        ? 'bg-blue-600 text-white'
-                        : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      ? 'bg-blue-600 text-white'
+                      : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                       }`}
                   >
                     {page}

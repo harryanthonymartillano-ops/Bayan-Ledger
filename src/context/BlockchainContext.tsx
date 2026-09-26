@@ -9,6 +9,7 @@ import { CONTRACT_ADDRESS } from '../lib/web3';
 import { readStoredChainBudgets, writeStoredChainBudgets, updateStoredChainBudget } from '../lib/chainBudgetCache';
 import { readBreachResolutionOverrides } from '../lib/breachDetection';
 import { isProjectTampered } from '../lib/projectIntegrity';
+import { readStoredProjects, writeStoredProjects, hasStoredProjects } from '../lib/projectCache';
 
 const deployedSelectorSupportCache = new Map<string, boolean>();
 
@@ -1030,8 +1031,8 @@ const mapAuditLogFromApi = (log: any): AuditLog => ({
 
 export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
   const { token, user } = useAuth();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [projects, setProjects] = useState<Project[]>(() => readStoredProjects());
+  const [isLoading, setIsLoading] = useState(() => !hasStoredProjects());
   const [alerts, setAlerts] = useState<SystemAlert[]>([]);
   /*
     {
@@ -1210,8 +1211,22 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const refreshProjects = async () => {
-    const response = await apiClient.getProjects(token ?? undefined) as { projects: any[] };
-    setProjects((response.projects || []).map(mapProjectFromApi));
+    try {
+      const response = await apiClient.getProjects(token ?? undefined, { limit: 100 }) as { projects: any[] };
+      const mapped = (response.projects || []).map(mapProjectFromApi);
+      if (mapped.length > 0) {
+        setProjects(mapped);
+        writeStoredProjects(mapped);
+      }
+      return mapped;
+    } catch (err) {
+      console.warn('Failed to refresh projects from backend:', err);
+      const cached = readStoredProjects();
+      if (cached.length > 0) {
+        setProjects(cached);
+      }
+      return cached;
+    }
   };
 
   const refreshAlerts = async () => {
@@ -1290,7 +1305,9 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     let isMounted = true;
     const loadDashboardData = async () => {
-      setIsLoading(true);
+      if (!hasStoredProjects()) {
+        setIsLoading(true);
+      }
       try {
         await refreshProjects();
 

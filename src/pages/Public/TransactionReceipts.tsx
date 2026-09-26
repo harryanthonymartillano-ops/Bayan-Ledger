@@ -1134,23 +1134,35 @@ export const TransactionReceipts = () => {
 
             {/* Empty State */}
             {filteredRows.length === 0 && (
-              <div className="flex min-h-64 flex-col items-center justify-center px-6 py-16 text-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
-                  <ShieldCheck className="h-6 w-6" />
+              projects.length === 0 ? (
+                <div className="p-8 space-y-4">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div key={i} className="h-12 w-full bg-slate-100 rounded animate-pulse" />
+                  ))}
                 </div>
-                <p className="mt-3 text-base font-bold text-slate-900">No transaction receipts found</p>
-                <p className="mt-1 text-xs text-slate-500 max-w-sm">
-                  We couldn't find receipts matching "{searchTerm}" under{' '}
-                  <strong>{officerFilter === 'all' ? 'All Officers' : officerFilter.toUpperCase()}</strong>.
-                </p>
-                <button
-                  type="button"
-                  onClick={handleClearFilters}
-                  className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800"
-                >
-                  Clear Filters
-                </button>
-              </div>
+              ) : (
+                <div className="flex min-h-64 flex-col items-center justify-center px-6 py-16 text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
+                    <ShieldCheck className="h-6 w-6" />
+                  </div>
+                  <p className="mt-3 text-base font-bold text-slate-900">No transaction receipts found</p>
+                  <p className="mt-1 text-xs text-slate-500 max-w-sm">
+                    {searchTerm ? (
+                      <>We couldn't find receipts matching "{searchTerm}" under{' '}
+                      <strong>{officerFilter === 'all' ? 'All Officers' : officerFilter.toUpperCase()}</strong>.</>
+                    ) : (
+                      <>No receipts under <strong>{officerFilter === 'all' ? 'All Officers' : officerFilter.toUpperCase()}</strong> at this time.</>
+                    )}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleClearFilters}
+                    className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+              )
             )}
 
             {/* Clean Pagination Controls */}

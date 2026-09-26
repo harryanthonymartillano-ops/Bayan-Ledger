@@ -41,6 +41,7 @@ import { isProjectTampered } from '../../lib/projectIntegrity';
 import { censorProfanity } from '../../lib/profanityFilter';
 import { isMilestoneDelayed, isProjectDelayed } from '../../lib/scheduleStatus';
 import { getStoredChainBudget, updateStoredChainBudget } from '../../lib/chainBudgetCache';
+import { getStoredProjectById } from '../../lib/projectCache';
 
 type TransparencyStage = {
   phase: string;
@@ -70,6 +71,143 @@ type TransparencySummary = {
   stages: TransparencyStage[];
 };
 
+const deriveTransparencySummaryFromProject = (proj: any): TransparencySummary | null => {
+  if (!proj || !proj.id) return null;
+
+  const milestones = Array.isArray(proj.milestones) ? proj.milestones : [];
+  const transactions = Array.isArray(proj.transactions) ? proj.transactions : [];
+  const publicDocuments = (proj.documents || []).filter(
+    (document: any) => !document.milestone_id && !document.milestoneId
+  );
+
+  const allocationTransaction = transactions.find((transaction: any) => {
+    const type = String(transaction.type || '').toLowerCase();
+    return type === 'allocation (saro)' || type === 'allocation';
+  }) || null;
+
+  const verifiedMilestones = milestones.filter(
+    (milestone: any) => milestone.status === 'Verified' || milestone.status === 'Paid'
+  ).length;
+  const paidMilestones = milestones.filter((milestone: any) => milestone.status === 'Paid').length;
+
+  const stages: TransparencyStage[] = [
+    {
+      phase: 'PHASE 1',
+      title: 'MPDC Creates Approved Project',
+      status: 'Completed',
+      statusLabel: 'MPDC Approved',
+      actorRole: 'MPDC (Planning)',
+      actorWallet: proj.blockchain_created_by_wallet || proj.createdByWallet || null,
+      timestamp: proj.created_at || proj.createdAt || null,
+      notes: 'Project was created directly as an approved municipal project.',
+    },
+    {
+      phase: 'GATE 1',
+      title: 'Budget Officer Allocation (SARO)',
+      status:
+        proj.status === 'Rejected - Budget Officer'
+          ? 'Rejected'
+          : allocationTransaction
+            ? 'Completed'
+            : 'Pending',
+      statusLabel:
+        proj.status === 'Rejected - Budget Officer'
+          ? 'Rejected - Budget Officer'
+          : allocationTransaction
+            ? 'SARO Approved - Pending Treasurer'
+            : 'Pending Budget Officer Review',
+      actorRole: 'Budget Officer',
+      actorWallet: proj.budget_officer_wallet || proj.budgetOfficerWallet || null,
+      timestamp: proj.budget_officer_signed_at || proj.budgetOfficerSignedAt || null,
+      reference: proj.saro || allocationTransaction?.saro || null,
+      amount: allocationTransaction ? Number(allocationTransaction.amount || 0) : Number(proj.allocatedFunds || 0),
+      notes:
+        proj.status === 'Rejected - Budget Officer'
+          ? proj.rejectionReason || 'Budget Officer rejected this project.'
+          : allocationTransaction
+            ? 'SARO created and first signature recorded.'
+            : 'Awaiting SARO allocation review.',
+    },
+    {
+      phase: 'GATE 2',
+      title: 'Treasurer Approval & Execution',
+      status:
+        proj.status === 'Rejected - Treasurer'
+          ? 'Rejected'
+          : ['ACTIVE', 'In Progress', 'Completed'].includes(proj.status)
+            ? 'Completed'
+            : 'Pending',
+      statusLabel:
+        proj.status === 'Rejected - Treasurer'
+          ? 'Rejected - Treasurer'
+          : ['ACTIVE', 'In Progress', 'Completed'].includes(proj.status)
+            ? 'Ready'
+            : 'Pending',
+      actorRole: 'Treasurer',
+      actorWallet: proj.treasurer_wallet || proj.treasurerWallet || null,
+      timestamp: proj.treasurer_signed_at || proj.treasurerSignedAt || null,
+      reference: proj.treasury_seal_hash || proj.treasurySealHash || null,
+      amount: allocationTransaction ? Number(allocationTransaction.amount || 0) : Number(proj.allocatedFunds || 0),
+      notes:
+        proj.status === 'Rejected - Treasurer'
+          ? proj.rejectionReason || 'Treasurer rejected this project.'
+          : ['ACTIVE', 'In Progress', 'Completed'].includes(proj.status)
+            ? 'Treasury activation complete. Digital seal of truth issued.'
+            : proj.status === 'SARO Approved - Pending Treasurer'
+              ? 'Awaiting Treasurer review and execution.'
+              : 'Treasurer action is not available yet.',
+    },
+    {
+      phase: 'PHASE 2',
+      title: 'Project Execution',
+      status:
+        proj.status === 'Completed'
+          ? 'Completed'
+          : proj.status === 'In Progress'
+            ? 'In Progress'
+            : proj.status === 'ACTIVE'
+              ? 'Ready'
+              : 'Locked',
+      statusLabel:
+        proj.status === 'Completed'
+          ? 'Completed'
+          : proj.status === 'In Progress'
+            ? 'In Progress'
+            : proj.status === 'ACTIVE'
+              ? 'ACTIVE'
+              : 'Locked Until Both Gates Pass',
+      actorRole: 'MPDC / Treasurer / Public',
+      actorWallet: null,
+      timestamp: proj.activated_at || proj.activatedAt || null,
+      reference: proj.latest_disbursement_ref || proj.latestDisbursementRef || null,
+      amount: Number(proj.disbursedFunds || 0),
+      notes:
+        proj.status === 'Completed'
+          ? `All milestones and disbursements are complete. Paid milestones: ${paidMilestones}/${milestones.length}.`
+          : proj.status === 'In Progress'
+            ? `Execution is live. Verified milestones: ${verifiedMilestones}/${milestones.length}.`
+            : proj.status === 'ACTIVE'
+              ? 'Execution is unlocked and ready for milestone evidence, verification, and disbursement requests.'
+              : 'Execution remains locked until Budget Officer and Treasurer approvals are complete.',
+    },
+  ];
+
+  return {
+    projectId: proj.id,
+    name: proj.name,
+    status: proj.status,
+    metadataHash: proj.metadataHash || null,
+    createdByWallet: proj.createdByWallet || null,
+    budgetOfficerWallet: proj.budgetOfficerWallet || null,
+    treasurerWallet: proj.treasurerWallet || null,
+    treasurySealHash: proj.treasurySealHash || null,
+    saroRef: proj.saro || null,
+    latestDisbursementRef: proj.latestDisbursementRef || null,
+    rejectionReason: proj.rejectionReason || null,
+    stages,
+  };
+};
+
 type PublicCommentPhoto = {
   id: string;
   url: string;
@@ -91,7 +229,15 @@ export const ProjectDetails = () => {
   const [attemptedLoad, setAttemptedLoad] = useState(false);
   const [previewItems, setPreviewItems] = useState<MediaLightboxItem[]>([]);
   const [selectedPreviewIndex, setSelectedPreviewIndex] = useState<number | null>(null);
-  const [comments, setComments] = useState<PublicComment[]>([]);
+  const [comments, setComments] = useState<PublicComment[]>(() => {
+    if (!id || typeof window === 'undefined') return [];
+    try {
+      const raw = window.localStorage.getItem(`sta-cruz-comments-${id}`);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsError, setCommentsError] = useState<string | null>(null);
   const [commentDisplayName, setCommentDisplayName] = useState('Anonymous');
@@ -121,7 +267,7 @@ export const ProjectDetails = () => {
     setTimeout(() => setCopiedHash(null), 2000);
   };
 
-  const project = projects.find((item) => item.id === id);
+  const project = projects.find((item) => item.id === id) || (id ? getStoredProjectById(id) : null);
   const displayProject = (project || {
     id,
     name: summary?.name || 'Project',
@@ -148,6 +294,7 @@ export const ProjectDetails = () => {
   const projectTransactionHash = displayProject.transactions?.find((transaction: any) => transaction.hash)?.hash || displayProject.blockchainTxHash || null;
   const tamperingDetected = blockchainPrice !== null && isProjectTampered(displayProject.totalBudget, blockchainPrice);
   const activePreview = selectedPreviewIndex !== null ? previewItems[selectedPreviewIndex] : null;
+  const effectiveSummary = summary || deriveTransparencySummaryFromProject(displayProject);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-PH', {
@@ -376,11 +523,17 @@ export const ProjectDetails = () => {
         setCommentsError(null);
         const response = await apiClient.getProjectComments(id) as { comments: PublicComment[] };
         if (!cancelled) {
-          setComments((response.comments || []).map((comment) => ({
+          const freshComments = (response.comments || []).map((comment) => ({
             ...comment,
             display_name: censorProfanity(comment.display_name || 'Anonymous'),
             content: censorProfanity(comment.content || ''),
-          })));
+          }));
+          setComments(freshComments);
+          if (typeof window !== 'undefined') {
+            try {
+              window.localStorage.setItem(`sta-cruz-comments-${id}`, JSON.stringify(freshComments));
+            } catch {}
+          }
         }
       } catch (error: any) {
         if (!cancelled) {
@@ -852,9 +1005,9 @@ export const ProjectDetails = () => {
                 <CardDescription>Public view of creation, SARO approval, Treasury activation, and execution readiness.</CardDescription>
               </CardHeader>
               <CardContent>
-                {summary ? (
+                {effectiveSummary ? (
                   <div className="space-y-4">
-                    {summary.stages.map((stage, index) => (
+                    {effectiveSummary.stages.map((stage, index) => (
                       <div key={`${stage.phase}-${stage.title}`} className="relative rounded-lg border border-slate-200 bg-white p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div>

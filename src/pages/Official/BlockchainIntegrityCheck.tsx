@@ -253,8 +253,8 @@ export const BlockchainIntegrityCheck: React.FC = () => {
                     const rowStatusBg = r.tampered
                       ? 'bg-red-50/50 dark:bg-red-950/20 hover:bg-red-50/80 dark:hover:bg-red-950/30 border-b border-red-200/60 dark:border-red-900/40'
                       : r.errors.length > 0
-                      ? 'bg-amber-50/50 dark:bg-amber-950/20 hover:bg-amber-50/80 dark:hover:bg-amber-950/30 border-b border-amber-200/60 dark:border-amber-900/40'
-                      : 'hover:bg-slate-50/80 dark:hover:bg-[#181c2b] border-b border-slate-100 dark:border-[#1e2334]';
+                        ? 'bg-amber-50/50 dark:bg-amber-950/20 hover:bg-amber-50/80 dark:hover:bg-amber-950/30 border-b border-amber-200/60 dark:border-amber-900/40'
+                        : 'hover:bg-slate-50/80 dark:hover:bg-[#181c2b] border-b border-slate-100 dark:border-[#1e2334]';
 
                     return (
                       <TableRow key={r.projectId} className={`transition-colors ${rowStatusBg}`}>
@@ -309,11 +309,10 @@ export const BlockchainIntegrityCheck: React.FC = () => {
                             {r.details.map((d, i) => (
                               <div
                                 key={i}
-                                className={`text-xs font-medium ${
-                                  r.tampered
+                                className={`text-xs font-medium ${r.tampered
                                     ? 'text-red-700 dark:text-red-300'
                                     : 'text-emerald-700 dark:text-emerald-300'
-                                }`}
+                                  }`}
                               >
                                 {d}
                               </div>

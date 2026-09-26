@@ -36,7 +36,7 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
 
   const fetchNotifications = useCallback(async () => {
     if (!token) return;
-    
+
     setIsLoading(true);
     try {
       const response = await apiClient.getNotifications(token) as { notifications: Notification[]; unreadCount: number };
@@ -51,10 +51,10 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
 
   const markAsRead = async (id: string) => {
     if (!token) return;
-    
+
     try {
       await apiClient.markNotificationRead(token, id);
-      setNotifications(prev => 
+      setNotifications(prev =>
         prev.map(n => n.id === id ? { ...n, is_read: true, read_at: new Date().toISOString() } : n)
       );
       setUnreadCount(prev => Math.max(0, prev - 1));
@@ -65,7 +65,7 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
 
   const markAllAsRead = async () => {
     if (!token) return;
-    
+
     try {
       await apiClient.markAllNotificationsRead(token);
       setNotifications(prev => prev.map(n => ({ ...n, is_read: true, read_at: new Date().toISOString() })));
@@ -77,7 +77,7 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
 
   const deleteNotification = async (id: string) => {
     if (!token) return;
-    
+
     try {
       await apiClient.deleteNotification(token, id);
       const notification = notifications.find(n => n.id === id);

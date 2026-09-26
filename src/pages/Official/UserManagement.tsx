@@ -387,35 +387,30 @@ export const UserManagement = () => {
         {/* Total Officials */}
         <Card
           onClick={() => { setRoleFilter('ALL'); setCurrentPage(1); }}
-          className={`cursor-pointer transition-all border shadow-xs hover:shadow-sm ${
-            roleFilter === 'ALL'
+          className={`cursor-pointer transition-all border shadow-xs hover:shadow-sm ${roleFilter === 'ALL'
               ? 'ring-2 ring-purple-500 bg-purple-50/80 border-purple-300 dark:bg-purple-950/40 dark:border-purple-500 dark:ring-purple-400'
               : 'border-slate-200 bg-white hover:border-slate-300 dark:border-[#1e2334] dark:bg-[#121520] dark:hover:border-slate-700'
-          }`}
+            }`}
         >
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
-              <span className={`text-[11px] font-bold uppercase tracking-wider ${
-                roleFilter === 'ALL' ? 'text-purple-700 dark:text-purple-200' : 'text-slate-500 dark:text-slate-400'
-              }`}>
+              <span className={`text-[11px] font-bold uppercase tracking-wider ${roleFilter === 'ALL' ? 'text-purple-700 dark:text-purple-200' : 'text-slate-500 dark:text-slate-400'
+                }`}>
                 Registered Officials
               </span>
-              <div className={`h-7 w-7 rounded-lg flex items-center justify-center ${
-                roleFilter === 'ALL'
+              <div className={`h-7 w-7 rounded-lg flex items-center justify-center ${roleFilter === 'ALL'
                   ? 'bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-200'
                   : 'bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400'
-              }`}>
+                }`}>
                 <Users className="h-4 w-4" />
               </div>
             </div>
-            <div className={`mt-2 text-2xl font-black ${
-              roleFilter === 'ALL' ? 'text-purple-950 dark:text-white' : 'text-slate-900 dark:text-white'
-            }`}>
+            <div className={`mt-2 text-2xl font-black ${roleFilter === 'ALL' ? 'text-purple-950 dark:text-white' : 'text-slate-900 dark:text-white'
+              }`}>
               {summary.total}
             </div>
-            <p className={`text-[11px] mt-0.5 ${
-              roleFilter === 'ALL' ? 'text-purple-700/80 dark:text-purple-200/80' : 'text-slate-500 dark:text-slate-400'
-            }`}>
+            <p className={`text-[11px] mt-0.5 ${roleFilter === 'ALL' ? 'text-purple-700/80 dark:text-purple-200/80' : 'text-slate-500 dark:text-slate-400'
+              }`}>
               Municipal governance accounts
             </p>
           </CardContent>
@@ -962,11 +957,10 @@ export const UserManagement = () => {
                       setRoleFilter(r);
                       setCurrentPage(1);
                     }}
-                    className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-colors whitespace-nowrap ${
-                      roleFilter === r
+                    className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-colors whitespace-nowrap ${roleFilter === r
                         ? 'bg-white text-slate-900 shadow-xs dark:bg-white dark:text-slate-950 font-bold'
                         : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
-                    }`}
+                      }`}
                   >
                     {r === 'ALL' ? 'All Roles' : r === 'MPDC (Planning)' ? 'MPDC' : r}
                   </button>
@@ -1030,11 +1024,10 @@ export const UserManagement = () => {
 
                     {/* Status */}
                     <TableCell className="py-3">
-                      <Badge variant={currentUser.status === 'Active' ? 'default' : 'secondary'} className={`text-[10px] font-semibold ${
-                        currentUser.status === 'Active' || !currentUser.status
+                      <Badge variant={currentUser.status === 'Active' ? 'default' : 'secondary'} className={`text-[10px] font-semibold ${currentUser.status === 'Active' || !currentUser.status
                           ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                           : 'bg-slate-100 text-slate-600 border border-slate-200'
-                      }`}>
+                        }`}>
                         {currentUser.status || 'Active'}
                       </Badge>
                     </TableCell>
@@ -1190,11 +1183,10 @@ export const UserManagement = () => {
                   <button
                     key={page}
                     onClick={() => setCurrentPage(page)}
-                    className={`h-8 min-w-8 rounded-md px-2 text-xs font-bold transition-colors ${
-                      currentPage === page
+                    className={`h-8 min-w-8 rounded-md px-2 text-xs font-bold transition-colors ${currentPage === page
                         ? 'bg-blue-600 text-white'
                         : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                    }`}
+                      }`}
                   >
                     {page}
                   </button>

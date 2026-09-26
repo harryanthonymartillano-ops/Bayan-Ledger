@@ -400,8 +400,8 @@ export const AuditTrails: React.FC = () => {
                 type="button"
                 onClick={() => setSelectedProjectId(project.id)}
                 className={`rounded-lg border p-4 text-left transition ${selectedProjectId === project.id
-                    ? 'border-blue-500 bg-blue-50 shadow-sm'
-                    : 'border-slate-200 bg-white hover:border-blue-300'
+                  ? 'border-blue-500 bg-blue-50 shadow-sm'
+                  : 'border-slate-200 bg-white hover:border-blue-300'
                   }`}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -453,8 +453,8 @@ export const AuditTrails: React.FC = () => {
                       key={page}
                       onClick={() => setCurrentPage(page)}
                       className={`px-3 py-2 rounded-md text-sm font-medium transition ${currentPage === page
-                          ? 'bg-blue-600 text-white'
-                          : 'border border-slate-300 text-slate-700 bg-white hover:bg-slate-50'
+                        ? 'bg-blue-600 text-white'
+                        : 'border border-slate-300 text-slate-700 bg-white hover:bg-slate-50'
                         }`}
                     >
                       {page}

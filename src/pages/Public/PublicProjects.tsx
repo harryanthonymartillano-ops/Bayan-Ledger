@@ -435,11 +435,10 @@ export const PublicProjects = () => {
               return (
                 <Link to={`/project/${project.id}`} key={project.id} className="group flex flex-col">
                   <Card
-                    className={`relative flex-1 flex flex-col justify-between rounded-xl bg-white p-5 shadow-sm transition-all hover:shadow-md ${
-                      budgetIsTampered
+                    className={`relative flex-1 flex flex-col justify-between rounded-xl bg-white p-5 shadow-sm transition-all hover:shadow-md ${budgetIsTampered
                         ? 'border-2 border-red-500 ring-2 ring-red-100 bg-red-50/10'
                         : 'border border-slate-200 hover:border-slate-300'
-                    }`}
+                      }`}
                   >
                     <div className="space-y-3">
                       {/* Tampering Warning Banner clearly visible inside the tampered project card */}
@@ -551,6 +550,17 @@ export const PublicProjects = () => {
               );
             })}
           </div>
+        ) : projects.length === 0 ? (
+          <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="h-64 rounded-xl border border-slate-200 bg-white p-5 animate-pulse">
+                <div className="h-4 w-1/3 bg-slate-200 rounded mb-4" />
+                <div className="h-6 w-3/4 bg-slate-200 rounded mb-3" />
+                <div className="h-4 w-1/2 bg-slate-100 rounded mb-6" />
+                <div className="h-20 bg-slate-100 rounded" />
+              </div>
+            ))}
+          </div>
         ) : (
           <div className="mt-8 rounded-xl border border-dashed border-slate-200 bg-white py-16 text-center">
             <AlertTriangle className="mx-auto h-10 w-10 text-slate-400" />
@@ -595,11 +605,10 @@ export const PublicProjects = () => {
                 <button
                   key={page}
                   onClick={() => setCurrentPage(page)}
-                  className={`h-8 min-w-8 rounded-md px-2 text-xs font-semibold transition-colors ${
-                    currentPage === page
+                  className={`h-8 min-w-8 rounded-md px-2 text-xs font-semibold transition-colors ${currentPage === page
                       ? 'bg-slate-900 text-white'
                       : 'border border-slate-200 text-slate-700 hover:bg-slate-50'
-                  }`}
+                    }`}
                 >
                   {page}
                 </button>
