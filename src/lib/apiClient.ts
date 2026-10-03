@@ -21,6 +21,18 @@ interface RequestOptions {
   token?: string;
 }
 
+export class ApiError extends Error {
+  status: number;
+  payload?: any;
+
+  constructor(message: string, status: number, payload?: any) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
 async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -34,7 +46,7 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(payload.error || 'Request failed');
+    throw new ApiError(payload.error || `Request failed with status ${response.status}`, response.status, payload);
   }
 
   return response.json();

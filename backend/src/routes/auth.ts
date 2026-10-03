@@ -240,12 +240,17 @@ router.get('/me', authenticateTokenAllowInactive, async (req: AuthRequest, res: 
       .eq('id', req.user.id)
       .single();
 
-    if (error) {
-      throw error;
-    }
-
-    if (!user) {
-      res.status(404).json({ error: 'User not found' });
+    if (error || !user) {
+      logger.warn(`Me fetch database notice (${error?.message || 'user not found in db'}), falling back to authenticated token claims.`);
+      res.json({
+        id: req.user.id,
+        email: req.user.email,
+        role: req.user.role,
+        walletAddress: req.user.walletAddress,
+        firstName: '',
+        lastName: '',
+        status: req.user.status || 'Active',
+      });
       return;
     }
 
