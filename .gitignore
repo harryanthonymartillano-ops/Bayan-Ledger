@@ -12,9 +12,8 @@ coverage/
 artifacts/
 cache/
 
-# Uploads & local storage (prevent bloating repo with uploaded PDFs and images)
-backend/uploads/
-uploads/
+# Local storage
+/uploads/
 
 # Logs
 *.log

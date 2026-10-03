@@ -20,6 +20,7 @@ import { getContract, getReadOnlyWeb3Provider } from '../../lib/web3';
 import { isMilestoneDelayed, isProjectDelayed } from '../../lib/scheduleStatus';
 import { OfficialAnalyticsDashboard } from '../../components/OfficialAnalyticsDashboard';
 import { readStoredChainBudgets, updateStoredChainBudget } from '../../lib/chainBudgetCache';
+import { ProjectImageThumbnail } from '../../components/ProjectImageThumbnail';
 
 type DashboardProject = ReturnType<typeof useBlockchain>['projects'][number];
 type ProjectMilestonePlan = {
@@ -257,7 +258,13 @@ export const Dashboard = () => {
       const assetUrl = new URL(url, apiOrigin);
       const isLocalApiHost = ['localhost', '127.0.0.1'].includes(apiBaseUrl.hostname);
       const browserHost = typeof window !== 'undefined' ? window.location.hostname : '';
-      const shouldUseBrowserHost = Boolean(browserHost) && !['localhost', '127.0.0.1'].includes(browserHost);
+      const isCloudFrontend = Boolean(browserHost) && (
+        browserHost.endsWith('.vercel.app') ||
+        browserHost.includes('vercel') ||
+        browserHost.endsWith('.pages.dev') ||
+        browserHost.endsWith('.netlify.app')
+      );
+      const shouldUseBrowserHost = Boolean(browserHost) && !['localhost', '127.0.0.1'].includes(browserHost) && !isCloudFrontend;
 
       if (assetUrl.pathname.startsWith('/uploads/')) {
         const resolvedUrl = new URL(`${apiOrigin}${assetUrl.pathname}`);
@@ -2357,10 +2364,11 @@ export const Dashboard = () => {
                                           className="group overflow-hidden rounded-lg border border-slate-200 dark:border-[#1e2334] bg-white dark:bg-[#181c2b] text-left shadow-sm transition-colors hover:border-blue-300"
                                         >
                                           <div className="aspect-video overflow-hidden bg-slate-100 dark:bg-slate-800">
-                                            <img
+                                            <ProjectImageThumbnail
                                               src={resolveAssetUrl(photo.url)}
                                               alt={photo.description || `${m.title} photo ${photoIndex + 1}`}
                                               className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                              fallbackHeight="h-full"
                                             />
                                           </div>
                                           <div className="p-2">

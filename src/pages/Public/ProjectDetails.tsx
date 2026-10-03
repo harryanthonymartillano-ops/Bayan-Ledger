@@ -42,6 +42,7 @@ import { censorProfanity } from '../../lib/profanityFilter';
 import { isMilestoneDelayed, isProjectDelayed } from '../../lib/scheduleStatus';
 import { getStoredChainBudget, updateStoredChainBudget } from '../../lib/chainBudgetCache';
 import { getStoredProjectById } from '../../lib/projectCache';
+import { ProjectImageThumbnail } from '../../components/ProjectImageThumbnail';
 
 type TransparencyStage = {
   phase: string;
@@ -221,44 +222,6 @@ type PublicComment = {
   photos?: PublicCommentPhoto[];
 };
 
-const ProjectImageThumbnail = ({
-  src,
-  alt,
-  className = "h-28 w-full object-cover",
-  fallbackHeight = "h-28",
-  fallbackLabel,
-}: {
-  src: string;
-  alt: string;
-  className?: string;
-  fallbackHeight?: string;
-  fallbackLabel?: string;
-}) => {
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    setError(false);
-  }, [src]);
-
-  if (error || !src) {
-    return (
-      <div className={`flex ${fallbackHeight} w-full flex-col items-center justify-center bg-slate-100 p-3 text-center text-slate-400`}>
-        <ImagePlus className="mb-1 h-6 w-6 text-slate-400" />
-        <span className="line-clamp-2 text-[11px] font-medium text-slate-500">{fallbackLabel || alt}</span>
-      </div>
-    );
-  }
-
-  return (
-    <img
-      src={src}
-      alt={alt}
-      className={className}
-      onError={() => setError(true)}
-    />
-  );
-};
-
 export const ProjectDetails = () => {
   const { id } = useParams<{ id: string }>();
   const { projects, chainBudgets } = useBlockchain();
@@ -371,7 +334,13 @@ export const ProjectDetails = () => {
       const assetUrl = new URL(url, apiOrigin);
       const isLocalApiHost = ['localhost', '127.0.0.1'].includes(apiBaseUrl.hostname);
       const browserHost = typeof window !== 'undefined' ? window.location.hostname : '';
-      const shouldUseBrowserHost = Boolean(browserHost) && !['localhost', '127.0.0.1'].includes(browserHost);
+      const isCloudFrontend = Boolean(browserHost) && (
+        browserHost.endsWith('.vercel.app') ||
+        browserHost.includes('vercel') ||
+        browserHost.endsWith('.pages.dev') ||
+        browserHost.endsWith('.netlify.app')
+      );
+      const shouldUseBrowserHost = Boolean(browserHost) && !['localhost', '127.0.0.1'].includes(browserHost) && !isCloudFrontend;
 
       if (assetUrl.pathname.startsWith('/uploads/')) {
         const resolvedUrl = new URL(`${apiOrigin}${assetUrl.pathname}`);
