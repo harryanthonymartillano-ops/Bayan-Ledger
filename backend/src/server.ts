@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { config } from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 
 import { initializeDatabase } from './db/config';
 import { logger } from './logger';
@@ -60,7 +61,13 @@ app.use('/uploads', (_req, res, next) => {
   );
   next();
 });
-app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
+const uploadsDir = fs.existsSync(path.resolve(process.cwd(), 'uploads'))
+  ? path.resolve(process.cwd(), 'uploads')
+  : fs.existsSync(path.resolve(__dirname, '../uploads'))
+    ? path.resolve(__dirname, '../uploads')
+    : path.resolve(process.cwd(), 'backend/uploads');
+
+app.use('/uploads', express.static(uploadsDir));
 
 app.get('/', (_req, res) => {
   res.json({

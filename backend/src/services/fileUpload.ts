@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { v2 as cloudinary } from 'cloudinary';
@@ -27,7 +28,11 @@ if (cloudinaryConfigured) {
   });
 }
 
-const uploadsRoot = path.resolve(process.cwd(), 'uploads');
+const uploadsRoot = fsSync.existsSync(path.resolve(process.cwd(), 'uploads'))
+  ? path.resolve(process.cwd(), 'uploads')
+  : fsSync.existsSync(path.resolve(__dirname, '../../uploads'))
+    ? path.resolve(__dirname, '../../uploads')
+    : path.resolve(process.cwd(), 'backend/uploads');
 
 const sanitizeFileName = (value: string) => value.replace(/[^a-zA-Z0-9._-]/g, '_');
 

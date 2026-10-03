@@ -1,6 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, ChevronRight, ExternalLink, FileText, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, FileText, ImageOff, X } from 'lucide-react';
 
 export type MediaLightboxItem = {
   type: 'image' | 'document';
@@ -19,6 +19,11 @@ type MediaLightboxProps = {
 export const MediaLightbox: React.FC<MediaLightboxProps> = ({ items, index, onClose, onIndexChange }) => {
   const activeItem = items[index];
   const hasManyItems = items.length > 1;
+  const [imageError, setImageError] = useState(false);
+
+  useEffect(() => {
+    setImageError(false);
+  }, [index, activeItem?.url]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -92,14 +97,55 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({ items, index, onCl
       <div className="flex h-full flex-col items-center justify-center px-4 py-16" onClick={(event) => event.stopPropagation()}>
         <div className="relative flex min-h-0 w-full max-w-5xl flex-1 items-center justify-center">
           {activeItem.type === 'image' ? (
-            <img
-              src={activeItem.url}
-              alt={activeItem.title}
-              className="max-h-[78vh] max-w-full rounded-lg object-contain shadow-2xl"
-            />
+            imageError ? (
+              <div className="flex min-h-[380px] w-full max-w-xl flex-col items-center justify-center rounded-xl bg-white p-8 text-center shadow-2xl">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-50 text-amber-600">
+                  <ImageOff className="h-8 w-8 text-amber-600" />
+                </div>
+                <h2 className="mt-4 max-w-md text-xl font-bold text-slate-900">{activeItem.title}</h2>
+                <p className="mt-2 text-sm text-slate-500">
+                  Unable to load this image preview from the storage server.
+                </p>
+                {isExternalUrl && (
+                  <a
+                    href={activeItem.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-6 inline-flex h-10 items-center justify-center rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
+                  >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Open image in new tab
+                  </a>
+                )}
+              </div>
+            ) : (
+              <img
+                src={activeItem.url}
+                alt={activeItem.title}
+                onError={() => setImageError(true)}
+                className="max-h-[78vh] max-w-full rounded-lg object-contain shadow-2xl"
+              />
+            )
           ) : isPreviewableDocument ? (
-            <div className="h-[78vh] w-full overflow-hidden rounded-lg bg-white shadow-2xl">
-              <iframe src={activeItem.url} title={activeItem.title} className="h-full w-full bg-white" />
+            <div className="flex h-[78vh] w-full flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-4 py-2.5 text-xs">
+                <div className="flex items-center space-x-2 truncate">
+                  <FileText className="h-4 w-4 text-slate-500 shrink-0" />
+                  <span className="font-semibold text-slate-800 truncate">{activeItem.title}</span>
+                </div>
+                {isExternalUrl && (
+                  <a
+                    href={activeItem.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center rounded bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-blue-700 shrink-0"
+                  >
+                    <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                    Open in new tab
+                  </a>
+                )}
+              </div>
+              <iframe src={activeItem.url} title={activeItem.title} className="h-full w-full flex-1 bg-white" />
             </div>
           ) : (
             <div className="flex min-h-[420px] w-full max-w-2xl flex-col items-center justify-center rounded-lg bg-white p-8 text-center shadow-2xl">
@@ -148,7 +194,14 @@ export const MediaLightbox: React.FC<MediaLightboxProps> = ({ items, index, onCl
                   aria-label={`Open ${item.title}`}
                 >
                   {item.type === 'image' ? (
-                    <img src={item.url} alt={item.title} className="h-full w-full object-cover" />
+                    <img
+                      src={item.url}
+                      alt={item.title}
+                      className="h-full w-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = 'none';
+                      }}
+                    />
                   ) : (
                     <span className="flex h-full w-full items-center justify-center bg-white/15 text-white">
                       <FileText className="h-6 w-6" />

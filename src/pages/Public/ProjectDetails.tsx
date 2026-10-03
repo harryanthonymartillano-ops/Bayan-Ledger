@@ -221,6 +221,44 @@ type PublicComment = {
   photos?: PublicCommentPhoto[];
 };
 
+const ProjectImageThumbnail = ({
+  src,
+  alt,
+  className = "h-28 w-full object-cover",
+  fallbackHeight = "h-28",
+  fallbackLabel,
+}: {
+  src: string;
+  alt: string;
+  className?: string;
+  fallbackHeight?: string;
+  fallbackLabel?: string;
+}) => {
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    setError(false);
+  }, [src]);
+
+  if (error || !src) {
+    return (
+      <div className={`flex ${fallbackHeight} w-full flex-col items-center justify-center bg-slate-100 p-3 text-center text-slate-400`}>
+        <ImagePlus className="mb-1 h-6 w-6 text-slate-400" />
+        <span className="line-clamp-2 text-[11px] font-medium text-slate-500">{fallbackLabel || alt}</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={className}
+      onError={() => setError(true)}
+    />
+  );
+};
+
 export const ProjectDetails = () => {
   const { id } = useParams<{ id: string }>();
   const { projects, chainBudgets } = useBlockchain();
@@ -862,7 +900,12 @@ export const ProjectDetails = () => {
                           index
                         )}
                       >
-                        <img src={resolveAssetUrl(photoUrl)} alt={`Location photo ${index + 1}`} className="h-64 w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]" />
+                        <ProjectImageThumbnail
+                          src={resolveAssetUrl(photoUrl)}
+                          alt={`Location photo ${index + 1}`}
+                          className="h-64 w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                          fallbackHeight="h-64"
+                        />
                         <div className="p-3 text-sm font-semibold text-slate-700">Location photo {index + 1}</div>
                       </button>
                     ))}
@@ -932,7 +975,12 @@ export const ProjectDetails = () => {
                                         )}
                                         className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50 text-left"
                                       >
-                                        <img src={resolveAssetUrl(photo.url)} alt={photo.description || milestone.title} className="h-28 w-full object-cover" />
+                                        <ProjectImageThumbnail
+                                          src={resolveAssetUrl(photo.url)}
+                                          alt={photo.description || milestone.title}
+                                          className="h-28 w-full object-cover"
+                                          fallbackHeight="h-28"
+                                        />
                                         <div className="p-2 text-xs text-slate-600">
                                           <div className="font-bold capitalize text-slate-700">{photo.type}</div>
                                           {photo.description && <div className="mt-1 line-clamp-2">{photo.description}</div>}
@@ -1194,7 +1242,12 @@ export const ProjectDetails = () => {
                             )}
                             className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
                           >
-                            <img src={resolveAssetUrl(photo.url)} alt="Citizen comment attachment" className="h-48 w-full object-cover" />
+                            <ProjectImageThumbnail
+                              src={resolveAssetUrl(photo.url)}
+                              alt="Citizen comment attachment"
+                              className="h-48 w-full object-cover"
+                              fallbackHeight="h-48"
+                            />
                           </button>
                         ))}
                       </div>
