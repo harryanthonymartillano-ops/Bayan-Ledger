@@ -641,11 +641,10 @@ export const Dashboard = () => {
                   const form = e.currentTarget;
                   const formData = new FormData(form);
                   const milestoneId = String(formData.get('requestMilestoneId') || '');
-                  const contractorAddress = String(formData.get('contractorAddress') || '').trim();
 
                   try {
                     setIsSubmittingDisbursementRequest(true);
-                    await createDisbursementRequest(project.id, milestoneId, contractorAddress);
+                    await createDisbursementRequest(project.id, milestoneId);
                     form.reset();
                     alert('Pending disbursement request created successfully.');
                   } catch (error: any) {
@@ -662,7 +661,6 @@ export const Dashboard = () => {
                       </option>
                     ))}
                   </select>
-                  <Input name="contractorAddress" placeholder="Contractor wallet address" required disabled={isSubmittingDisbursementRequest} />
                   <Button type="submit" className="w-full bg-slate-900 hover:bg-slate-800" disabled={isSubmittingDisbursementRequest}>
                     {isSubmittingDisbursementRequest ? (
                       <>

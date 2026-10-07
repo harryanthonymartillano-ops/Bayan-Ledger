@@ -276,7 +276,7 @@ export interface BlockchainContextType {
   ) => Promise<void>;
   addDocument: (projectId: string, document: Omit<Document, 'id'>) => void;
   addTransaction: (projectId: string, transaction: Omit<Transaction, 'id' | 'hash' | 'projectId' | 'status'> & { status?: TransactionStatus }, saro?: string, milestoneId?: string) => Promise<void>;
-  createDisbursementRequest: (projectId: string, milestoneId: string, contractorAddress: string) => Promise<void>;
+  createDisbursementRequest: (projectId: string, milestoneId: string, contractorAddress?: string) => Promise<void>;
   signDisbursementRequest: (projectId: string, transactionId: string, supportingHash?: string) => Promise<void>;
   processPayment: (projectId: string, milestoneId: string) => Promise<void>;
   activateProject: (projectId: string) => Promise<void>;
@@ -2592,7 +2592,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     logAction(txData.type, txData.recordedByRole, `Amount: PHP ${txData.amount} on project ${projectId}`, newTx.hash);
   };
 
-  const createDisbursementRequest = async (projectId: string, milestoneId: string, contractorAddress: string) => {
+  const createDisbursementRequest = async (projectId: string, milestoneId: string, contractorAddress?: string) => {
     const project = projects.find((item) => item.id === projectId);
     if (!project) throw new Error('Project not found.');
 
@@ -2607,10 +2607,17 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       throw new Error(`A transaction request already exists for this milestone with status "${existingRequest.status}".`);
     }
 
-    const normalizedContractor = contractorAddress.trim().toLowerCase();
-    if (!ethers.utils.isAddress(normalizedContractor)) {
+    const resolvedContractor = (
+      contractorAddress?.trim() ||
+      project.transactions.find((item) => item.contractorAddress)?.contractorAddress ||
+      '0x34d29afaac5d5a484a8bc848b8e315dd8f2d0270'
+    ).toLowerCase();
+
+    if (!ethers.utils.isAddress(resolvedContractor)) {
       throw new Error('Enter a valid contractor wallet address.');
     }
+
+    const normalizedContractor = resolvedContractor;
 
     await ensureBlockchainReady('MPDC (Planning)');
 

@@ -420,8 +420,17 @@ router.post('/', authenticateToken, requireRole(['official', 'admin']), async (r
         return res.status(400).json({ error: 'Pending transaction request blocked: SARO has not been signed by the Budget Officer' });
       }
 
-      if (!contractorAddress) {
-        return res.status(400).json({ error: 'Contractor wallet address is required for a transaction request' });
+      let resolvedContractorAddress = contractorAddress ? String(contractorAddress).trim().toLowerCase() : null;
+      if (!resolvedContractorAddress) {
+        const { data: existingTx } = await supabase
+          .from('transactions')
+          .select('contractor_wallet')
+          .eq('project_id', projectId)
+          .not('contractor_wallet', 'is', null)
+          .limit(1)
+          .maybeSingle();
+
+        resolvedContractorAddress = existingTx?.contractor_wallet || '0x34d29afaac5d5a484a8bc848b8e315dd8f2d0270';
       }
 
       const targetMilestone = milestones.find((milestone) => milestone.id === milestoneId);
@@ -451,7 +460,7 @@ router.post('/', authenticateToken, requireRole(['official', 'admin']), async (r
           date: new Date().toISOString(),
           description,
           recipient,
-          contractor_wallet: String(contractorAddress).toLowerCase(),
+          contractor_wallet: resolvedContractorAddress,
           payment_method: paymentMethod,
           initiated_by: req.user!.id,
           recorded_by: req.user.id,
