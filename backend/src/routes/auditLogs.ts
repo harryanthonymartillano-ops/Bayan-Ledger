@@ -17,24 +17,40 @@ const formatUserName = (user: any) => {
   return fullName || user.email || 'System';
 };
 
+// In-memory cache for user metadata to avoid querying users table on every log view
+const usersCache = new Map<string, { user: any; expiresAt: number }>();
+const USERS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 const enrichAuditLogs = async (logs: any[]) => {
   const userIds = Array.from(
     new Set(logs.map((log) => log.user_id).filter((userId): userId is string => typeof userId === 'string' && userId.length > 0))
   );
 
   const userMap = new Map<string, any>();
+  const missingUserIds: string[] = [];
+  const now = Date.now();
 
-  if (userIds.length > 0) {
+  for (const uid of userIds) {
+    const cached = usersCache.get(uid);
+    if (cached && cached.expiresAt > now) {
+      userMap.set(uid, cached.user);
+    } else {
+      missingUserIds.push(uid);
+    }
+  }
+
+  if (missingUserIds.length > 0) {
     const { data: users, error } = await supabase
       .from('users')
       .select('id, first_name, middle_name, last_name, email, role, wallet_address')
-      .in('id', userIds);
+      .in('id', missingUserIds);
 
     if (error) {
       logger.warn('Failed to enrich audit logs with user data:', error);
     } else {
       for (const user of users || []) {
         userMap.set(user.id, user);
+        usersCache.set(user.id, { user, expiresAt: now + USERS_CACHE_TTL_MS });
       }
     }
   }
@@ -52,6 +68,21 @@ const enrichAuditLogs = async (logs: any[]) => {
   });
 };
 
+interface AuditLogsCacheEntry {
+  data: any;
+  expiresAt: number;
+}
+const auditLogsCache = new Map<string, AuditLogsCacheEntry>();
+const trailCache = new Map<string, AuditLogsCacheEntry>();
+const AUDIT_LOGS_CACHE_TTL_MS = 30 * 1000; // 30-second cache
+
+export const clearAuditLogsCache = () => {
+  auditLogsCache.clear();
+  trailCache.clear();
+};
+
+const AUDIT_LOG_COLUMNS = 'id, timestamp, action, user_role, user_id, resource_type, resource_id, details, hash, tx_hash, created_at';
+
 // Get audit logs with pagination and filtering
 router.get('/', authenticateToken, requireRole(['official', 'admin']), async (req: AuthRequest, res: Response) => {
   try {
@@ -65,13 +96,21 @@ router.get('/', authenticateToken, requireRole(['official', 'admin']), async (re
       end_date,
     } = req.query;
 
+    const cacheKey = JSON.stringify({ page, limit, action, user_id, resource_type, start_date, end_date });
+    const cached = auditLogsCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && cached.expiresAt > now) {
+      res.setHeader('Cache-Control', 'private, max-age=15');
+      return res.json(cached.data);
+    }
+
     const pageNum = parseInt(page as string, 10);
     const limitNum = parseInt(limit as string, 10);
     const offset = (pageNum - 1) * limitNum;
 
     let query = supabase
       .from('audit_logs')
-      .select('*', { count: 'exact' })
+      .select(AUDIT_LOG_COLUMNS, { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(offset, offset + limitNum - 1);
 
@@ -101,7 +140,7 @@ router.get('/', authenticateToken, requireRole(['official', 'admin']), async (re
 
     const enrichedLogs = await enrichAuditLogs(data || []);
 
-    res.json({
+    const responsePayload = {
       logs: enrichedLogs,
       pagination: {
         page: pageNum,
@@ -109,7 +148,15 @@ router.get('/', authenticateToken, requireRole(['official', 'admin']), async (re
         total: count,
         pages: Math.ceil((count || 0) / limitNum),
       },
+    };
+
+    auditLogsCache.set(cacheKey, {
+      data: responsePayload,
+      expiresAt: now + AUDIT_LOGS_CACHE_TTL_MS,
     });
+
+    res.setHeader('Cache-Control', 'private, max-age=15');
+    res.json(responsePayload);
   } catch (error) {
     logger.error('Fetch audit logs error:', error);
     res.status(500).json({ error: 'Failed to fetch audit logs' });
@@ -123,7 +170,7 @@ router.get('/resource/:type/:id', authenticateToken, requireRole(['official', 'a
 
     const { data, error } = await supabase
       .from('audit_logs')
-      .select('*')
+      .select(AUDIT_LOG_COLUMNS)
       .eq('resource_type', type)
       .eq('resource_id', id)
       .order('created_at', { ascending: false });
@@ -144,7 +191,17 @@ router.get('/resource/:type/:id', authenticateToken, requireRole(['official', 'a
 
 router.get('/project/:id/trail', authenticateToken, requireRole(['official', 'admin']), async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id || '');
+    if (!id) {
+      return res.status(400).json({ error: 'Project ID is required' });
+    }
+
+    const cached = trailCache.get(id);
+    const now = Date.now();
+    if (cached && cached.expiresAt > now) {
+      res.setHeader('Cache-Control', 'private, max-age=30');
+      return res.json(cached.data);
+    }
 
     const { data: project, error: projectError } = await supabase
       .from('projects')
@@ -196,21 +253,21 @@ router.get('/project/:id/trail', authenticateToken, requireRole(['official', 'ad
       alertLogsResult,
       milestonePhotoLogsResult,
     ] = await Promise.all([
-      supabase.from('audit_logs').select('*').eq('resource_type', 'project').eq('resource_id', id),
+      supabase.from('audit_logs').select(AUDIT_LOG_COLUMNS).eq('resource_type', 'project').eq('resource_id', id),
       milestoneIds.length > 0
-        ? supabase.from('audit_logs').select('*').eq('resource_type', 'milestone').in('resource_id', milestoneIds)
+        ? supabase.from('audit_logs').select(AUDIT_LOG_COLUMNS).eq('resource_type', 'milestone').in('resource_id', milestoneIds)
         : emptyQueryResult(),
       transactionIds.length > 0
-        ? supabase.from('audit_logs').select('*').eq('resource_type', 'transaction').in('resource_id', transactionIds)
+        ? supabase.from('audit_logs').select(AUDIT_LOG_COLUMNS).eq('resource_type', 'transaction').in('resource_id', transactionIds)
         : emptyQueryResult(),
       documentIds.length > 0
-        ? supabase.from('audit_logs').select('*').eq('resource_type', 'document').in('resource_id', documentIds)
+        ? supabase.from('audit_logs').select(AUDIT_LOG_COLUMNS).eq('resource_type', 'document').in('resource_id', documentIds)
         : emptyQueryResult(),
       alertIds.length > 0
-        ? supabase.from('audit_logs').select('*').eq('resource_type', 'system_alert').in('resource_id', alertIds)
+        ? supabase.from('audit_logs').select(AUDIT_LOG_COLUMNS).eq('resource_type', 'system_alert').in('resource_id', alertIds)
         : emptyQueryResult(),
       milestonePhotoIds.length > 0
-        ? supabase.from('audit_logs').select('*').eq('resource_type', 'milestone_photo').in('resource_id', milestonePhotoIds)
+        ? supabase.from('audit_logs').select(AUDIT_LOG_COLUMNS).eq('resource_type', 'milestone_photo').in('resource_id', milestonePhotoIds)
         : emptyQueryResult(),
     ]);
 
@@ -245,7 +302,7 @@ router.get('/project/:id/trail', authenticateToken, requireRole(['official', 'ad
 
     const logs = await enrichAuditLogs(dedupedLogs);
 
-    res.json({
+    const payload = {
       trail: {
         project,
         coverage: {
@@ -259,7 +316,15 @@ router.get('/project/:id/trail', authenticateToken, requireRole(['official', 'ad
         },
         logs,
       },
+    };
+
+    trailCache.set(id, {
+      data: payload,
+      expiresAt: now + AUDIT_LOGS_CACHE_TTL_MS,
     });
+
+    res.setHeader('Cache-Control', 'private, max-age=30');
+    res.json(payload);
   } catch (error) {
     logger.error('Fetch project audit trail error:', error);
     res.status(500).json({ error: 'Failed to fetch project audit trail' });
@@ -271,10 +336,10 @@ router.get('/my-logs', authenticateToken, async (req: AuthRequest, res: Response
   try {
     const { data, error } = await supabase
       .from('audit_logs')
-      .select('*')
+      .select(AUDIT_LOG_COLUMNS)
       .eq('user_id', req.user!.id)
       .order('created_at', { ascending: false })
-      .limit(100);
+      .limit(50);
 
     if (error) {
       logger.error('Database error:', error);

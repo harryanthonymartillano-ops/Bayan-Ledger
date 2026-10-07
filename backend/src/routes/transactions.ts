@@ -9,6 +9,7 @@ import {
   generateSignatureHash,
   generateMilestoneVerificationHash,
 } from '../lib/hashUtils';
+import { clearProjectsCache } from './projects';
 
 const router = Router();
 
@@ -93,6 +94,8 @@ const insertAuditLog = async (payload: {
     hash: hashToStore,
     tx_hash: txHashToStore,
   });
+
+  clearProjectsCache();
 };
 
 const fetchProjectMilestoneStatuses = async (projectId: string) => {
@@ -115,7 +118,7 @@ router.get('/project/:projectId', authenticateToken, async (req: AuthRequest, re
 
     const { data, error } = await supabase
       .from('transactions')
-      .select('*')
+      .select('id, project_id, milestone_id, amount, type, date, recipient, payment_method, recorded_by, recorded_by_role, description, hash, saro, contractor_wallet, signature_count, budget_signed_at, budget_signed_by, budget_signature_hash, treasurer_signed_at, treasurer_signed_by, digital_seal_hash, request_tx_hash, rejection_reason, rejected_by_role, blockchain_tx_hash, status, created_at, updated_at')
       .eq('project_id', projectId)
       .order('created_at', { ascending: false });
 
@@ -124,7 +127,7 @@ router.get('/project/:projectId', authenticateToken, async (req: AuthRequest, re
       return res.status(500).json({ error: 'Failed to fetch transactions' });
     }
 
-    res.json({ transactions: data });
+    res.json({ transactions: data || [] });
   } catch (error) {
     logger.error('Fetch transactions error:', error);
     res.status(500).json({ error: 'Failed to fetch transactions' });

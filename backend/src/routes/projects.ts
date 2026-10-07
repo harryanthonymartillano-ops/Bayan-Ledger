@@ -311,7 +311,9 @@ const deriveTransparencyStages = (project: any, transactions: any[], milestones:
 };
 
 const buildProjectTransparencySummary = async (project: any) => {
-  const projectWithEvidence = await attachProjectEvidence(project);
+  const projectWithEvidence = Array.isArray(project.milestones)
+    ? project
+    : await attachProjectEvidence(project);
   const milestones = projectWithEvidence.milestones || [];
   const transactions = projectWithEvidence.transactions || [];
   const publicDocuments = (projectWithEvidence.documents || []).filter((document: any) => !document.milestone_id && !document.milestoneId);
@@ -352,7 +354,7 @@ const csvEscape = (value: unknown) => {
 
 const buildProjectTransparencyCsv = async (project: any) => {
   const projectWithEvidence = await attachProjectEvidence(project);
-  const summary = await buildProjectTransparencySummary(project);
+  const summary = await buildProjectTransparencySummary(projectWithEvidence);
   const rows: string[] = [];
 
   rows.push('section,key,value');
@@ -433,22 +435,22 @@ const attachProjectEvidence = async (project: any) => {
   const [{ data: milestones }, { data: documents }, { data: milestonePhotos }, { data: transactions }, comments] = await Promise.all([
     supabase
       .from('milestones')
-      .select('*')
+      .select('id, project_id, title, description, percentage, status, budget, deliverables, due_date, date_verified, verified_by, photo_url, ipfs_hash, evidence_hash, report_hash, onchain_paid, blockchain_tx_hash')
       .eq('project_id', project.id)
       .order('due_date', { ascending: true }),
     supabase
       .from('documents')
-      .select('*')
+      .select('id, project_id, milestone_id, title, name, type, url, storage_provider, file_format, size, verified, created_at')
       .eq('project_id', project.id)
       .order('created_at', { ascending: false }),
     supabase
       .from('milestone_photos')
-      .select('*')
+      .select('id, milestone_id, project_id, photo_type, url, description, created_at')
       .eq('project_id', project.id)
       .order('created_at', { ascending: true }),
     supabase
       .from('transactions')
-      .select('*')
+      .select('id, project_id, milestone_id, amount, type, date, recipient, status, hash, saro, recorded_by_role, signature_count, created_at')
       .eq('project_id', project.id)
       .order('created_at', { ascending: false }),
     fetchProjectComments(project.id),
@@ -478,11 +480,24 @@ interface ProjectsCacheEntry {
   expiresAt: number;
 }
 
-const projectsListCache = new Map<string, ProjectsCacheEntry>();
-const PROJECTS_CACHE_TTL_MS = 15 * 1000; // 15-second cache for public project listings
+interface ProjectDetailCacheEntry {
+  data: any;
+  expiresAt: number;
+}
 
-export const clearProjectsCache = () => {
+const projectsListCache = new Map<string, ProjectsCacheEntry>();
+const projectDetailCache = new Map<string, ProjectDetailCacheEntry>();
+const PROJECTS_CACHE_TTL_MS = 5 * 60 * 1000; // 5-minute cache for public project listings
+const PROJECT_DETAIL_CACHE_TTL_MS = 2 * 60 * 1000; // 2-minute cache for project details
+
+export const clearProjectsCache = (projectId?: string) => {
   projectsListCache.clear();
+  if (projectId) {
+    projectDetailCache.delete(projectId);
+    projectDetailCache.delete(`summary:${projectId}`);
+  } else {
+    projectDetailCache.clear();
+  }
 };
 
 const attachProjectsEvidenceBatch = async (projects: any[]) => {
@@ -500,22 +515,22 @@ const attachProjectsEvidenceBatch = async (projects: any[]) => {
   ] = await Promise.all([
     supabase
       .from('milestones')
-      .select('*')
+      .select('id, project_id, title, description, percentage, status, budget, deliverables, due_date, date_verified, verified_by, photo_url, ipfs_hash, evidence_hash, report_hash, onchain_paid, blockchain_tx_hash')
       .in('project_id', projectIds)
       .order('due_date', { ascending: true }),
     supabase
       .from('documents')
-      .select('*')
+      .select('id, project_id, milestone_id, title, name, type, url, storage_provider, file_format, size, verified, created_at')
       .in('project_id', projectIds)
       .order('created_at', { ascending: false }),
     supabase
       .from('transactions')
-      .select('*')
+      .select('id, project_id, milestone_id, amount, type, date, recipient, status, hash, saro, recorded_by_role, signature_count, created_at')
       .in('project_id', projectIds)
       .order('created_at', { ascending: false }),
     supabase
       .from('milestone_photos')
-      .select('*')
+      .select('id, milestone_id, project_id, photo_type, url, description, created_at')
       .in('project_id', projectIds)
       .order('created_at', { ascending: true }),
   ]);
@@ -695,6 +710,7 @@ router.get('/', async (req: Request, res: Response) => {
     const cached = projectsListCache.get(cacheKey);
     const now = Date.now();
     if (cached && cached.expiresAt > now) {
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
       return res.json(cached.data);
     }
 
@@ -744,6 +760,7 @@ router.get('/', async (req: Request, res: Response) => {
       expiresAt: now + PROJECTS_CACHE_TTL_MS,
     });
 
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
     res.json(responsePayload);
   } catch (error) {
     logger.error('Fetch projects error:', error);
@@ -754,7 +771,17 @@ router.get('/', async (req: Request, res: Response) => {
 // Get project by ID
 router.get('/:id', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id || '');
+    if (!id) {
+      return res.status(400).json({ error: 'Project ID is required' });
+    }
+
+    const cached = projectDetailCache.get(id);
+    const now = Date.now();
+    if (cached && cached.expiresAt > now) {
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+      return res.json(cached.data);
+    }
 
     const { data: project, error } = await supabase
       .from('projects')
@@ -767,10 +794,15 @@ router.get('/:id', async (req: Request, res: Response) => {
     }
 
     const projectWithEvidence = await attachProjectEvidence(project);
+    const payload = { project: projectWithEvidence };
 
-    res.json({
-      project: projectWithEvidence,
+    projectDetailCache.set(id, {
+      data: payload,
+      expiresAt: now + PROJECT_DETAIL_CACHE_TTL_MS,
     });
+
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+    res.json(payload);
   } catch (error) {
     logger.error('Fetch project error:', error);
     res.status(500).json({ error: 'Failed to fetch project' });
@@ -779,7 +811,18 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 router.get('/:id/transparency-summary', async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params.id || '');
+    if (!id) {
+      return res.status(400).json({ error: 'Project ID is required' });
+    }
+
+    const cacheKey = `summary:${id}`;
+    const cached = projectDetailCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && cached.expiresAt > now) {
+      res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+      return res.json(cached.data);
+    }
 
     const { data: project, error } = await supabase
       .from('projects')
@@ -792,7 +835,15 @@ router.get('/:id/transparency-summary', async (req: Request, res: Response) => {
     }
 
     const summary = await buildProjectTransparencySummary(project);
-    res.json({ summary });
+    const payload = { summary };
+
+    projectDetailCache.set(cacheKey, {
+      data: payload,
+      expiresAt: now + PROJECT_DETAIL_CACHE_TTL_MS,
+    });
+
+    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=120');
+    res.json(payload);
   } catch (error) {
     logger.error('Fetch transparency summary error:', error);
     res.status(500).json({ error: 'Failed to fetch transparency summary' });

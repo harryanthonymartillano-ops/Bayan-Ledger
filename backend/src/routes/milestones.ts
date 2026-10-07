@@ -7,6 +7,7 @@ import { authenticateToken, AuthRequest, requireRole } from '../middleware/auth'
 import { uploadFileBuffer } from '../services/fileUpload';
 import { createNotification, notifyUsers } from './notifications';
 import { generateMilestoneVerificationHash } from '../lib/hashUtils';
+import { clearProjectsCache } from './projects';
 
 const router = Router();
 const normalizeRole = (role: string) => role.trim().toLowerCase();
@@ -29,6 +30,8 @@ const photoUpload = multer({
   },
 });
 
+const MILESTONE_COLUMNS = 'id, project_id, title, description, percentage, status, budget, deliverables, due_date, date_verified, verified_by, photo_url, ipfs_hash, evidence_hash, report_hash, onchain_paid, blockchain_tx_hash, created_at';
+
 // Get milestones for a project
 router.get('/project/:projectId', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
@@ -36,7 +39,7 @@ router.get('/project/:projectId', authenticateToken, async (req: AuthRequest, re
 
     const { data, error } = await supabase
       .from('milestones')
-      .select('*')
+      .select(MILESTONE_COLUMNS)
       .eq('project_id', projectId)
       .order('due_date', { ascending: true });
 
@@ -45,7 +48,7 @@ router.get('/project/:projectId', authenticateToken, async (req: AuthRequest, re
       return res.status(500).json({ error: 'Failed to fetch milestones' });
     }
 
-    res.json({ milestones: data });
+    res.json({ milestones: data || [] });
   } catch (error) {
     logger.error('Fetch milestones error:', error);
     res.status(500).json({ error: 'Failed to fetch milestones' });
@@ -75,13 +78,15 @@ router.post('/', authenticateToken, requireRole(['official', 'admin']), async (r
         status: 'Pending',
         created_by: req.user!.id,
       })
-      .select()
+      .select(MILESTONE_COLUMNS)
       .single();
 
     if (error) {
       logger.error('Database error:', error);
       return res.status(500).json({ error: 'Failed to create milestone' });
     }
+
+    clearProjectsCache(projectId);
 
     // Log audit event
     await supabase.from('audit_logs').insert({
@@ -113,13 +118,15 @@ router.put('/:id', authenticateToken, requireRole(['official', 'admin']), async 
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
-      .select()
+      .select(MILESTONE_COLUMNS)
       .single();
 
     if (error) {
       logger.error('Database error:', error);
       return res.status(500).json({ error: 'Failed to update milestone' });
     }
+
+    clearProjectsCache(data.project_id);
 
     // Log audit event
     await supabase.from('audit_logs').insert({
@@ -209,7 +216,7 @@ router.post('/:id/verify', authenticateToken, requireRole(['official', 'admin'])
       })
       .eq('id', id)
       .eq('status', 'Pending')
-      .select()
+      .select(MILESTONE_COLUMNS)
       .single();
 
     if (updateError) {
@@ -231,6 +238,8 @@ router.post('/:id/verify', authenticateToken, requireRole(['official', 'admin'])
       logger.error('Project status update error during milestone verify:', projectUpdateError);
       return res.status(500).json({ error: 'Milestone verified but project status failed to sync' });
     }
+
+    clearProjectsCache(milestone.project_id);
 
     // Log audit event
     await supabase.from('audit_logs').insert({
@@ -336,13 +345,15 @@ router.post('/:id/photos', authenticateToken, requireRole(['official', 'admin'])
         uploaded_by_wallet: req.user!.walletAddress || null,
         captured_at: capturedAt || new Date().toISOString(),
       })
-      .select()
+      .select('id, milestone_id, project_id, photo_type, url, photo_hash, description, created_at')
       .single();
 
     if (error) {
       logger.error('Milestone photo upload database error:', error);
       return res.status(500).json({ error: 'Failed to save milestone photo' });
     }
+
+    clearProjectsCache(projectId);
 
     await supabase.from('audit_logs').insert({
       user_id: req.user!.id,
@@ -365,6 +376,12 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req: Aut
   try {
     const { id } = req.params;
 
+    const { data: existing } = await supabase
+      .from('milestones')
+      .select('id, project_id')
+      .eq('id', id)
+      .single();
+
     const { error } = await supabase
       .from('milestones')
       .delete()
@@ -373,6 +390,12 @@ router.delete('/:id', authenticateToken, requireRole(['admin']), async (req: Aut
     if (error) {
       logger.error('Database error:', error);
       return res.status(500).json({ error: 'Failed to delete milestone' });
+    }
+
+    if (existing?.project_id) {
+      clearProjectsCache(existing.project_id);
+    } else {
+      clearProjectsCache();
     }
 
     // Log audit event

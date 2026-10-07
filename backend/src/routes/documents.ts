@@ -5,6 +5,7 @@ import { supabase } from '../db/config';
 import { logger } from '../logger';
 import { authenticateToken, AuthRequest, requireRole } from '../middleware/auth';
 import { deleteStoredFile, uploadFileBuffer } from '../services/fileUpload';
+import { clearProjectsCache } from './projects';
 
 const router = Router();
 
@@ -37,6 +38,8 @@ const upload = multer({
 interface AuthRequestWithFile extends AuthRequest {
   file?: Express.Multer.File;
 }
+
+const DOCUMENT_COLUMNS = 'id, project_id, milestone_id, title, name, type, url, storage_provider, file_format, size, verified, created_at';
 
 // Upload document
 router.post('/upload', authenticateToken, requireRole(['official', 'admin']), upload.single('document'), async (req: Request, res: Response) => {
@@ -85,13 +88,15 @@ router.post('/upload', authenticateToken, requireRole(['official', 'admin']), up
         uploaded_by_wallet: authReq.user!.walletAddress,
         description,
       })
-      .select()
+      .select(DOCUMENT_COLUMNS)
       .single();
 
     if (dbError) {
       logger.error('Database error:', dbError);
       return res.status(500).json({ error: 'Failed to save document metadata' });
     }
+
+    clearProjectsCache(projectId);
 
     await supabase.from('audit_logs').insert({
       user_id: authReq.user!.id,
@@ -116,7 +121,7 @@ router.get('/project/:projectId', authenticateToken, async (req: AuthRequest, re
 
     const { data, error } = await supabase
       .from('documents')
-      .select('*')
+      .select(DOCUMENT_COLUMNS)
       .eq('project_id', projectId)
       .order('created_at', { ascending: false });
 
@@ -125,7 +130,7 @@ router.get('/project/:projectId', authenticateToken, async (req: AuthRequest, re
       return res.status(500).json({ error: 'Failed to fetch documents' });
     }
 
-    res.json({ documents: data });
+    res.json({ documents: data || [] });
   } catch (error) {
     logger.error('Fetch documents error:', error);
     res.status(500).json({ error: 'Failed to fetch documents' });
@@ -140,7 +145,7 @@ router.delete('/:id', authenticateToken, requireRole(['official', 'admin']), asy
     // Get document info first
     const { data: document, error: fetchError } = await supabase
       .from('documents')
-      .select('*')
+      .select('id, project_id, storage_provider, cloudinary_id, storage_path, url, name')
       .eq('id', id)
       .single();
 
@@ -149,9 +154,9 @@ router.delete('/:id', authenticateToken, requireRole(['official', 'admin']), asy
     }
 
     await deleteStoredFile({
-      provider: document.storage_provider,
-      cloudinaryId: document.cloudinary_id,
-      path: document.storage_path,
+      provider: document.storage_provider as any,
+      cloudinaryId: document.cloudinary_id || undefined,
+      path: document.storage_path || undefined,
       url: document.url,
     });
 
@@ -165,6 +170,8 @@ router.delete('/:id', authenticateToken, requireRole(['official', 'admin']), asy
       logger.error('Database error:', deleteError);
       return res.status(500).json({ error: 'Failed to delete document' });
     }
+
+    clearProjectsCache(document.project_id);
 
     // Log audit event
     await supabase.from('audit_logs').insert({

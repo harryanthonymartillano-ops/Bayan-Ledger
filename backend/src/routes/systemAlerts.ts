@@ -6,36 +6,55 @@ import { notifyUsers } from './notifications';
 
 const router = Router();
 
-// Ensure system_alerts table exists
+let systemAlertsTableVerified = false;
+
+// Ensure system_alerts table exists (only once)
 async function ensureSystemAlertsTableExists() {
+  if (systemAlertsTableVerified) return;
   try {
     const { error } = await supabase
       .from('system_alerts')
       .select('id')
       .limit(1);
 
-    if (error && error.message.includes('relation "system_alerts" does not exist')) {
-      logger.info('Creating system_alerts table...');
-      // Table will be created via Supabase migration if needed
+    if (!error) {
+      systemAlertsTableVerified = true;
+    } else if (error.message.includes('relation "system_alerts" does not exist')) {
+      logger.info('System_alerts table does not exist yet.');
     }
   } catch (error) {
     logger.warn(`Error ensuring system_alerts table: ${error}`);
   }
 }
 
-// Initialize table on startup
+// Initialize table on startup once
 ensureSystemAlertsTableExists();
+
+interface AlertsCacheEntry {
+  data: any;
+  expiresAt: number;
+}
+let alertsCache: AlertsCacheEntry | null = null;
+const ALERTS_CACHE_TTL_MS = 60 * 1000; // 60-second cache
+
+export const clearAlertsCache = () => {
+  alertsCache = null;
+};
 
 // Get all system alerts
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
-    await ensureSystemAlertsTableExists();
+    const now = Date.now();
+    if (alertsCache && alertsCache.expiresAt > now) {
+      res.setHeader('Cache-Control', 'private, max-age=30');
+      return res.json(alertsCache.data);
+    }
 
     const { error, data } = await supabase
       .from('system_alerts')
-      .select('*')
+      .select('id, project_id, message, severity, alert_type, status, details, detected_at, created_at')
       .order('created_at', { ascending: false })
-      .limit(100);
+      .limit(50);
 
     if (error) {
       if (error.message.includes('relation "system_alerts" does not exist')) {
@@ -45,7 +64,14 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       return res.status(500).json({ error: 'Failed to fetch alerts' });
     }
 
-    res.json({ alerts: data || [] });
+    const payload = { alerts: data || [] };
+    alertsCache = {
+      data: payload,
+      expiresAt: now + ALERTS_CACHE_TTL_MS,
+    };
+
+    res.setHeader('Cache-Control', 'private, max-age=30');
+    res.json(payload);
   } catch (error) {
     logger.error('Get system alerts error:', error);
     res.status(500).json({ error: 'Failed to fetch alerts' });
@@ -55,8 +81,6 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 // Create a system alert
 router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
-    await ensureSystemAlertsTableExists();
-
     const { projectId, message, severity = 'INFO', alertType, details } = req.body;
 
     if (!message) {
@@ -75,7 +99,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
         detected_by: req.user?.id,
         detected_at: new Date().toISOString(),
       })
-      .select()
+      .select('id, project_id, message, severity, alert_type, status, details, detected_at, created_at')
       .single();
 
     if (error) {
@@ -83,6 +107,7 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       return res.status(500).json({ error: 'Failed to create alert' });
     }
 
+    clearAlertsCache();
     logger.info(`System alert created: ${message}`);
     try {
       const { data: admins } = await supabase
@@ -116,8 +141,6 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 // Update system alert status
 router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
-    await ensureSystemAlertsTableExists();
-
     const { id } = req.params;
     const { status } = req.body;
 
@@ -139,7 +162,7 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response) 
       .from('system_alerts')
       .update(updateData)
       .eq('id', id)
-      .select()
+      .select('id, project_id, message, severity, alert_type, status, details, detected_at, created_at')
       .single();
 
     if (error) {
@@ -147,6 +170,7 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response) 
       return res.status(500).json({ error: 'Failed to update alert' });
     }
 
+    clearAlertsCache();
     logger.info(`System alert ${id} updated: ${status}`);
     res.json(data);
   } catch (error) {
@@ -158,13 +182,11 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response) 
 // Get alerts for a specific project
 router.get('/project/:projectId', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
-    await ensureSystemAlertsTableExists();
-
     const { projectId } = req.params;
 
     const { error, data } = await supabase
       .from('system_alerts')
-      .select('*')
+      .select('id, project_id, message, severity, alert_type, status, details, detected_at, created_at')
       .eq('project_id', projectId)
       .order('created_at', { ascending: false });
 

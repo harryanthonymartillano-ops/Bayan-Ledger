@@ -90,12 +90,33 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Poll for new notifications every 30 seconds
+  // Poll for new notifications every 60 seconds only when tab is active and user is logged in
   useEffect(() => {
+    if (!token) return;
+
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000);
-    return () => clearInterval(interval);
-  }, [fetchNotifications]);
+
+    const poll = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchNotifications();
+      }
+    };
+
+    const interval = setInterval(poll, 60000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchNotifications();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [fetchNotifications, token]);
 
   return (
     <NotificationContext.Provider value={{
