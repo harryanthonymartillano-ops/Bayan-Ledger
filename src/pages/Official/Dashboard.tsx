@@ -142,7 +142,7 @@ export const Dashboard = () => {
       milestoneId: string,
       photo: DashboardEvidencePhoto,
       file: File
-    ) => Promise<void>)(projectId, milestoneId, photo, file);
+    ) => Promise<string | undefined>)(projectId, milestoneId, photo, file);
   };
   const [selectedProjectPhotoIndex, setSelectedProjectPhotoIndex] = useState<number | null>(null);
   const [selectedProjectPreviewItems, setSelectedProjectPreviewItems] = useState<MediaLightboxItem[]>([]);
@@ -537,52 +537,33 @@ export const Dashboard = () => {
                   setIsSubmittingMilestoneEvidence(true);
 
                   try {
+                    // 1. Prepare evidence hashes and counts
                     const evidenceHash = `evidence-${Date.now()}-${project.id}-${milestoneId}`;
                     const reportHash = reports.map((file) => file.name).join('|') || 'report-batch-empty';
 
-                    // First, verify milestone on blockchain - if this fails, no files are uploaded
-                    const primaryPhotoUrl = URL.createObjectURL(photos[0]);
-                    await verifyMilestone(project.id, milestoneId, user.id, primaryPhotoUrl, {
-                      evidenceHash,
-                      reportHash,
-                      photoCount,
-                      reportCount
-                    });
-
-                    // Only upload files after blockchain transaction succeeds
-                    for (const [index, file] of photos.entries()) {
-                      const photoType: 'before' | 'after' | 'proof' =
-                        photos.length === 1 ? 'proof' : index === 0 ? 'before' : index === 1 ? 'after' : 'proof';
-
-                      await addMilestonePhoto(project.id, milestoneId, {
-                        type: photoType,
-                        url: '',
-                        photoHash: `upload-${Date.now()}-${index}-${file.name}`,
-                        timestamp: new Date().toISOString(),
-                        description: `${photoType === 'proof' ? (photos.length === 1 ? 'Milestone' : 'Additional') : photoType.charAt(0).toUpperCase() + photoType.slice(1)} evidence uploaded for ${milestone.title}`,
-                        uploadedBy: user.id
-                      }, file);
-                    }
-
-                    for (const [, file] of reports.entries()) {
-                      await uploadDocumentWithHash(project.id, {
-                        title: file.name,
-                        type: 'Report',
-                        url: URL.createObjectURL(file),
-                        fileFormat: 'PDF',
-                        uploadedBy: user.id,
-                        dateUploaded: new Date().toISOString(),
-                        size: file.size,
-                        version: 1,
-                        verified: false
-                      }, file, milestoneId);
-                    }
+                    // 2. Verify on blockchain FIRST. Evidence files are uploaded to Supabase ONLY AFTER blockchain transaction succeeds.
+                    await verifyMilestone(
+                      project.id,
+                      milestoneId,
+                      user.id,
+                      '',
+                      {
+                        evidenceHash,
+                        reportHash,
+                        photoCount,
+                        reportCount,
+                      },
+                      {
+                        photos,
+                        reports,
+                      }
+                    );
 
                     form.reset();
                     resetMilestoneEvidenceSelection();
-                    alert(`Milestone verified successfully with ${photoCount} photo(s) and ${reportCount} PDF report(s).`);
+                    alert(`Milestone verified successfully on blockchain with ${photoCount} photo(s) and ${reportCount} PDF report(s) uploaded to Supabase.`);
                   } catch (error: any) {
-                    alert(error?.message || 'Failed to upload the full evidence package and verify the milestone.');
+                    alert(error?.message || 'Failed to verify the milestone on the blockchain.');
                   } finally {
                     setIsSubmittingMilestoneEvidence(false);
                   }
@@ -2311,9 +2292,26 @@ export const Dashboard = () => {
                   {selectedProjectRecord?.milestones.length ? (
                     selectedProjectRecord.milestones.map(m => {
                       const milestoneDelayed = isMilestoneDelayed(m);
-                      const milestonePhotos = m.photos || [];
-                      const milestoneReports =
+                      const rawMilestonePhotos = m.photos || [];
+                      const rawMilestoneReports =
                         selectedProjectRecord.documents?.filter((doc: DashboardEvidenceDocument & { id?: string; milestoneId?: string }) => doc.milestoneId === m.id) || [];
+
+                      const seenPhotoKeys = new Set<string>();
+                      const milestonePhotos = rawMilestonePhotos.filter((p) => {
+                        const key = p.photoHash || p.url?.split('?')[0] || p.id;
+                        if (!key || seenPhotoKeys.has(key)) return false;
+                        seenPhotoKeys.add(key);
+                        return true;
+                      });
+
+                      const seenDocKeys = new Set<string>();
+                      const milestoneReports = rawMilestoneReports.filter((doc) => {
+                        const key = doc.checksumHash || (doc.title && doc.size ? `${doc.title}_${doc.size}` : doc.url?.split('?')[0] || doc.id);
+                        if (!key || seenDocKeys.has(key)) return false;
+                        seenDocKeys.add(key);
+                        return true;
+                      });
+
                       const milestonePhotoItems: MediaLightboxItem[] = milestonePhotos.map((photo, photoIndex) => ({
                         type: 'image',
                         url: resolveAssetUrl(photo.url),

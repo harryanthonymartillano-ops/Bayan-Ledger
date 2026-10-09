@@ -271,9 +271,10 @@ export interface BlockchainContextType {
     projectId: string,
     milestoneId: string,
     verifiedBy: string,
-    photoUrl: string,
-    evidence?: { evidenceHash: string; reportHash: string; photoCount: number; reportCount: number }
-  ) => Promise<void>;
+    photoUrl?: string,
+    evidence?: { evidenceHash: string; reportHash: string; photoCount: number; reportCount: number },
+    evidenceFiles?: { photos: File[]; reports: File[] }
+  ) => Promise<string | void>;
   addDocument: (projectId: string, document: Omit<Document, 'id'>) => void;
   addTransaction: (projectId: string, transaction: Omit<Transaction, 'id' | 'hash' | 'projectId' | 'status'> & { status?: TransactionStatus }, saro?: string, milestoneId?: string) => Promise<void>;
   createDisbursementRequest: (projectId: string, milestoneId: string, contractorAddress?: string) => Promise<void>;
@@ -298,7 +299,7 @@ export interface BlockchainContextType {
   calculateComplianceScore: (projectId: string) => ComplianceScore;
   getAllDepartmentBudgets: () => DepartmentBudget[];
   uploadDocumentWithHash: (projectId: string, document: Omit<Document, 'id' | 'ipfsHash' | 'checksumHash'>, file: File, milestoneId?: string) => Promise<void>;
-  addMilestonePhoto: (projectId: string, milestoneId: string, photo: Omit<MilestonePhoto, 'id'>, file: File) => Promise<void>;
+  addMilestonePhoto: (projectId: string, milestoneId: string, photo: Omit<MilestonePhoto, 'id'>, file: File) => Promise<string | undefined>;
   checkMilestoneVerificationRequirements: (projectId: string, milestoneId: string) => { isReady: boolean; photoCount: number; reportCount: number; missingPhotos: number; missingReports: number };
   refreshProjectFromChain: (projectId: string) => Promise<void>;
   chainBudgets: Record<string, number>;
@@ -2327,9 +2328,10 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     projectId: string,
     milestoneId: string,
     verifiedBy: string,
-    photoUrl: string,
-    evidence?: { evidenceHash: string; reportHash: string; photoCount: number; reportCount: number }
-  ) => {
+    photoUrl = '',
+    evidence?: { evidenceHash: string; reportHash: string; photoCount: number; reportCount: number },
+    evidenceFiles?: { photos: File[]; reports: File[] }
+  ): Promise<string> => {
     const project = projects.find(p => p.id === projectId);
     const milestone = project?.milestones.find(m => m.id === milestoneId);
 
@@ -2347,6 +2349,11 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
 
     await ensureBlockchainReady('MPDC (Planning)');
 
+    const calculatedPhotoCount = Math.min(255, Math.max(1, evidence?.photoCount || evidenceFiles?.photos.length || milestone.photos?.length || 1));
+    const calculatedReportCount = Math.min(255, Math.max(1, evidence?.reportCount || evidenceFiles?.reports.length || 1));
+    const effectiveEvidenceHash = evidence?.evidenceHash || `evidence-${Date.now()}-${projectId}-${milestoneId}`;
+    const effectiveReportHash = evidence?.reportHash || (evidenceFiles?.reports.map(f => f.name).join('|')) || 'report-batch-empty';
+
     // Generate verification data for IPFS
     const verificationData = {
       projectId,
@@ -2355,7 +2362,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       verifiedBy,
       timestamp: new Date().toISOString(),
       photos: milestone.photos || [],
-      reportUrl: photoUrl
+      reportUrl: photoUrl || '',
     };
 
     // Upload verification data to IPFS
@@ -2364,17 +2371,17 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     let txHash = generateHash();
     try {
       let tx;
-      if (evidence && contractHasFunction('verifyMilestoneWithEvidence(string,string,uint8,string,string,string,uint8,uint8)')) {
+      if (contractHasFunction('verifyMilestoneWithEvidence(string,string,uint8,string,string,string,uint8,uint8)')) {
         try {
           tx = await contract!.verifyMilestoneWithEvidence(
             projectId,
             milestoneId,
             milestone.percentage,
             ipfsHash,
-            evidence.evidenceHash,
-            evidence.reportHash,
-            evidence.photoCount,
-            evidence.reportCount
+            effectiveEvidenceHash,
+            effectiveReportHash,
+            calculatedPhotoCount,
+            calculatedReportCount
           );
         } catch (evidenceTxError: any) {
           const errMsg = String(evidenceTxError?.message || '');
@@ -2396,16 +2403,72 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       throw new Error(describeBlockchainFailure('Milestone verification', error));
     }
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // CRITICAL: Upload evidence files to Supabase ONLY AFTER blockchain tx succeeded!
+    // ──────────────────────────────────────────────────────────────────────────
+    let primaryPhotoUrl = photoUrl;
+    const uploadedPhotosList: any[] = [];
+
+    if (evidenceFiles && token) {
+      const { photos = [], reports = [] } = evidenceFiles;
+
+      // 1. Upload proof photos to Supabase Storage & milestone_photos
+      for (const [index, file] of photos.entries()) {
+        const photoType: 'before' | 'after' | 'proof' =
+          photos.length === 1 ? 'proof' : index === 0 ? 'before' : index === 1 ? 'after' : 'proof';
+
+        try {
+          const formData = new FormData();
+          formData.append('photo', file);
+          formData.append('projectId', projectId);
+          formData.append('photoType', photoType);
+          formData.append('description', `${photoType === 'proof' ? (photos.length === 1 ? 'Milestone' : 'Additional') : photoType.charAt(0).toUpperCase() + photoType.slice(1)} evidence uploaded for ${milestone.title}`);
+          formData.append('capturedAt', new Date().toISOString());
+
+          const res = await apiClient.uploadMilestonePhoto(token, milestoneId, formData) as { photo?: { url: string; id: string } };
+          const uploadedUrl = res?.photo?.url;
+          if (uploadedUrl) {
+            if (!primaryPhotoUrl) primaryPhotoUrl = uploadedUrl;
+            uploadedPhotosList.push({
+              type: photoType,
+              url: uploadedUrl,
+              description: `${photoType} evidence uploaded for ${milestone.title}`,
+            });
+          }
+        } catch (photoErr) {
+          console.error(`Failed to upload milestone photo ${file.name}:`, photoErr);
+        }
+      }
+
+      // 2. Upload PDF reports to Supabase Storage & documents
+      for (const file of reports) {
+        try {
+          const docIpfsHash = await uploadToIPFS(file, file.name);
+          const formData = new FormData();
+          formData.append('document', file);
+          formData.append('projectId', projectId);
+          formData.append('documentType', 'Report');
+          formData.append('ipfsHash', docIpfsHash);
+          formData.append('milestoneId', milestoneId);
+          formData.append('description', file.name);
+          await apiClient.uploadDocument(token, formData);
+        } catch (reportErr) {
+          console.error(`Failed to upload milestone report ${file.name}:`, reportErr);
+        }
+      }
+    }
+
     if (token) {
       await apiClient.verifyMilestone(token, milestoneId, {
         verificationData: {
           ...verificationData,
           ipfsHash,
-          photoUrl,
-          evidenceHash: evidence?.evidenceHash,
-          reportHash: evidence?.reportHash,
-          photoCount: evidence?.photoCount,
-          reportCount: evidence?.reportCount,
+          photoUrl: primaryPhotoUrl || photoUrl,
+          photos: uploadedPhotosList.length > 0 ? uploadedPhotosList : verificationData.photos,
+          evidenceHash: effectiveEvidenceHash,
+          reportHash: effectiveReportHash,
+          photoCount: calculatedPhotoCount,
+          reportCount: calculatedReportCount,
         },
         transactionHash: txHash,
       });
@@ -2415,6 +2478,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
 
     await refreshProjectFromChain(projectId).catch(() => undefined);
     logAction('Milestone Verified', 'MPDC (Planning)', `Verified milestone ${milestoneId} (${milestone.percentage}%) on project ${projectId}`, txHash);
+    return txHash;
   };
 
   const addDocument = (projectId: string, documentData: Omit<Document, 'id'>) => {
@@ -3219,10 +3283,12 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     formData.append('description', photo.description || '');
     formData.append('capturedAt', photo.timestamp);
 
-    await apiClient.uploadMilestonePhoto(token, milestoneId, formData);
+    const res = await apiClient.uploadMilestonePhoto(token, milestoneId, formData) as { photo?: { url: string; id: string } };
     await refreshProjects();
     await refreshAuditLogs();
+    return res?.photo?.url;
   };
+
 
   const checkMilestoneVerificationRequirements = (projectId: string, milestoneId: string) => {
     const project = projects.find(p => p.id === projectId);

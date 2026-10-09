@@ -70,22 +70,27 @@ export const MilestoneProofGallery: React.FC<MilestoneProofGalleryProps> = ({ mi
 
                 {/* Photo Grid */}
                 <div className="p-4">
-                  {milestone.photos && milestone.photos.length > 0 && (
-                    <div className="grid grid-cols-3 gap-2 mb-4">
-                      {milestone.photos.slice(0, 3).map((photo) => (
-                        <div key={photo.id} className="relative aspect-square rounded-lg overflow-hidden bg-slate-200">
-                          <img
-                            src={photo.url}
-                            alt={photo.type}
-                            className="w-full h-full object-cover"
-                          />
-                          <Badge className={`absolute bottom-1 right-1 text-xs ${getPhotoTypeColor(photo.type)}`}>
-                            {getPhotoTypeLabel(photo.type)}
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {milestone.photos && milestone.photos.length > 0 && (() => {
+                    const uniquePhotos = (milestone.photos || []).filter((photo: any, index: number, self: any[]) =>
+                      index === self.findIndex((p: any) => (p.photoHash && p.photoHash === photo.photoHash) || (p.url && p.url === photo.url) || p.id === photo.id)
+                    );
+                    return uniquePhotos.length > 0 && (
+                      <div className="grid grid-cols-3 gap-2 mb-4">
+                        {uniquePhotos.slice(0, 3).map((photo) => (
+                          <div key={photo.id} className="relative aspect-square rounded-lg overflow-hidden bg-slate-200">
+                            <img
+                              src={photo.url}
+                              alt={photo.type}
+                              className="w-full h-full object-cover"
+                            />
+                            <Badge className={`absolute bottom-1 right-1 text-xs ${getPhotoTypeColor(photo.type)}`}>
+                              {getPhotoTypeLabel(photo.type)}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
 
                   {/* Verification Info */}
                   <div className="space-y-2 text-sm">

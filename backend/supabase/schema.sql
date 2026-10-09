@@ -226,12 +226,22 @@ create table if not exists public.audit_logs (
   tx_hash text,
   created_at timestamptz not null default now()
 );
+create table if not exists public.system_alerts (
+  id uuid primary key default gen_random_uuid(),
+  project_id text references public.projects(id) on delete cascade,
+  message text not null,
+  severity text not null default 'INFO',
+  alert_type text default 'general',
+  status text not null default 'Unresolved',
+  details jsonb,
+  tampering_alert_id text,
+  resolved_by text,
+  resolved_at timestamptz,
+  created_at timestamptz not null default now()
+);
 
-
-
-
-
-
+create index if not exists idx_system_alerts_project_id on public.system_alerts(project_id);
+create index if not exists idx_system_alerts_status on public.system_alerts(status);
 
 create table if not exists public.blockchain_events (
   id uuid primary key default gen_random_uuid(),

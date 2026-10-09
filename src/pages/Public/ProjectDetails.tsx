@@ -892,8 +892,25 @@ export const ProjectDetails = () => {
                 {displayProject.milestones.length > 0 ? (
                   <div className="space-y-5">
                     {displayProject.milestones.map((milestone: any, index: number) => {
-                      const milestoneReports = displayProject.documents?.filter((doc: any) => doc.milestoneId === milestone.id) || [];
-                      const milestonePhotos = milestone.photos || [];
+                      const rawMilestoneReports = displayProject.documents?.filter((doc: any) => doc.milestoneId === milestone.id) || [];
+                      const rawMilestonePhotos = milestone.photos || [];
+
+                      const seenPhotoKeys = new Set<string>();
+                      const milestonePhotos = rawMilestonePhotos.filter((photo: any) => {
+                        const key = photo.photoHash || photo.url?.split('?')[0] || photo.id;
+                        if (!key || seenPhotoKeys.has(key)) return false;
+                        seenPhotoKeys.add(key);
+                        return true;
+                      });
+
+                      const seenDocKeys = new Set<string>();
+                      const milestoneReports = rawMilestoneReports.filter((doc: any) => {
+                        const key = doc.checksumHash || (doc.title && doc.size ? `${doc.title}_${doc.size}` : doc.url?.split('?')[0] || doc.id);
+                        if (!key || seenDocKeys.has(key)) return false;
+                        seenDocKeys.add(key);
+                        return true;
+                      });
+
                       const milestoneDelayed = isMilestoneDelayed(milestone);
 
                       return (

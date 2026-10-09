@@ -3,9 +3,11 @@ import fsSync from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { v2 as cloudinary } from 'cloudinary';
+import { supabase } from '../db/config';
+import { logger } from '../logger';
 
 export interface StoredFileResult {
-  provider: 'cloudinary' | 'local';
+  provider: 'supabase' | 'cloudinary' | 'local';
   url: string;
   path?: string;
   cloudinaryId?: string;
@@ -13,6 +15,8 @@ export interface StoredFileResult {
   size: number;
   originalName: string;
 }
+
+const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'bayan-ledger';
 
 const cloudinaryConfigured = Boolean(
   process.env.CLOUDINARY_CLOUD_NAME &&
@@ -72,6 +76,40 @@ export async function uploadFileBuffer(
     });
   }
 
+  // Attempt upload to Supabase Storage bucket
+  try {
+    const filename = `${Date.now()}-${crypto.randomUUID()}-${sanitizeFileName(originalName)}`;
+    const storagePath = `${folder}/${filename}`;
+    const { error: uploadError } = await supabase.storage
+      .from(SUPABASE_STORAGE_BUCKET)
+      .upload(storagePath, buffer, {
+        contentType: mimeType,
+        upsert: true,
+      });
+
+    if (!uploadError) {
+      const { data: publicData } = supabase.storage
+        .from(SUPABASE_STORAGE_BUCKET)
+        .getPublicUrl(storagePath);
+
+      if (publicData?.publicUrl) {
+        return {
+          provider: 'supabase',
+          url: publicData.publicUrl,
+          path: storagePath,
+          mimeType,
+          size: buffer.length,
+          originalName,
+        };
+      }
+    } else {
+      logger.warn(`Supabase storage upload failed, falling back to local: ${uploadError.message}`);
+    }
+  } catch (storageErr: any) {
+    logger.warn(`Supabase storage error, falling back to local: ${storageErr?.message || storageErr}`);
+  }
+
+  // Fallback to local uploads directory
   const subdir = path.join(uploadsRoot, folder);
   await fs.mkdir(subdir, { recursive: true });
 
@@ -81,8 +119,6 @@ export async function uploadFileBuffer(
 
   return {
     provider: 'local',
-    // Store a relative asset path so the frontend can resolve it against
-    // the actual public backend origin in local, LAN, or internet deployments.
     url: `/uploads/${folder}/${filename}`,
     path: filepath,
     mimeType,
@@ -98,6 +134,14 @@ export async function deleteStoredFile(file: { provider?: string; cloudinaryId?:
     return;
   }
 
+  if (file.provider === 'supabase' && file.path) {
+    await supabase.storage
+      .from(SUPABASE_STORAGE_BUCKET)
+      .remove([file.path])
+      .catch((err) => logger.warn(`Failed to delete file from Supabase storage: ${err?.message || err}`));
+    return;
+  }
+
   const localPath = file.path || (file.url && file.url.includes('/uploads/')
     ? path.join(uploadsRoot, file.url.split('/uploads/')[1] || '')
     : undefined);
@@ -106,3 +150,4 @@ export async function deleteStoredFile(file: { provider?: string; cloudinaryId?:
     await fs.unlink(localPath).catch(() => undefined);
   }
 }
+

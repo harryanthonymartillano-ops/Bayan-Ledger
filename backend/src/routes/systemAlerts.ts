@@ -41,6 +41,14 @@ export const clearAlertsCache = () => {
   alertsCache = null;
 };
 
+const formatAlert = (alert: any) => {
+  if (!alert) return alert;
+  return {
+    ...alert,
+    detected_at: alert.created_at || new Date().toISOString(),
+  };
+};
+
 // Get all system alerts
 router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
@@ -52,7 +60,7 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 
     const { error, data } = await supabase
       .from('system_alerts')
-      .select('id, project_id, message, severity, alert_type, status, details, detected_at, created_at')
+      .select('*')
       .order('created_at', { ascending: false })
       .limit(50);
 
@@ -64,7 +72,8 @@ router.get('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       return res.status(500).json({ error: 'Failed to fetch alerts' });
     }
 
-    const payload = { alerts: data || [] };
+    const formattedAlerts = (data || []).map(formatAlert);
+    const payload = { alerts: formattedAlerts };
     alertsCache = {
       data: payload,
       expiresAt: now + ALERTS_CACHE_TTL_MS,
@@ -87,19 +96,19 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Message is required' });
     }
 
+    const insertPayload: any = {
+      project_id: projectId || null,
+      message,
+      severity,
+      alert_type: alertType || 'general',
+      status: 'Unresolved',
+      details: details || null,
+    };
+
     const { error, data } = await supabase
       .from('system_alerts')
-      .insert({
-        project_id: projectId || null,
-        message,
-        severity,
-        alert_type: alertType,
-        status: 'Unresolved',
-        details: details || null,
-        detected_by: req.user?.id,
-        detected_at: new Date().toISOString(),
-      })
-      .select('id, project_id, message, severity, alert_type, status, details, detected_at, created_at')
+      .insert(insertPayload)
+      .select('*')
       .single();
 
     if (error) {
@@ -109,6 +118,8 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
 
     clearAlertsCache();
     logger.info(`System alert created: ${message}`);
+    const alertData = formatAlert(data);
+
     try {
       const { data: admins } = await supabase
         .from('users')
@@ -124,14 +135,14 @@ router.post('/', authenticateToken, async (req: AuthRequest, res: Response) => {
           message,
           link: '/official/alerts',
           resourceType: 'alert',
-          resourceId: data.id,
+          resourceId: alertData.id,
         });
       }
     } catch (notifErr) {
       logger.warn('Failed to dispatch alert notification to admins:', notifErr);
     }
 
-    res.status(201).json(data);
+    res.status(201).json(alertData);
   } catch (error) {
     logger.error('Create system alert error:', error);
     res.status(500).json({ error: 'Failed to create alert' });
@@ -150,11 +161,10 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response) 
 
     const updateData: any = {
       status,
-      updated_at: new Date().toISOString(),
     };
 
     if (status === 'Resolved') {
-      updateData.resolved_by = req.user?.id;
+      updateData.resolved_by = req.user?.id || null;
       updateData.resolved_at = new Date().toISOString();
     }
 
@@ -162,7 +172,7 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response) 
       .from('system_alerts')
       .update(updateData)
       .eq('id', id)
-      .select('id, project_id, message, severity, alert_type, status, details, detected_at, created_at')
+      .select('*')
       .single();
 
     if (error) {
@@ -172,7 +182,7 @@ router.patch('/:id', authenticateToken, async (req: AuthRequest, res: Response) 
 
     clearAlertsCache();
     logger.info(`System alert ${id} updated: ${status}`);
-    res.json(data);
+    res.json(formatAlert(data));
   } catch (error) {
     logger.error('Update system alert error:', error);
     res.status(500).json({ error: 'Failed to update alert' });
@@ -186,7 +196,7 @@ router.get('/project/:projectId', authenticateToken, async (req: AuthRequest, re
 
     const { error, data } = await supabase
       .from('system_alerts')
-      .select('id, project_id, message, severity, alert_type, status, details, detected_at, created_at')
+      .select('*')
       .eq('project_id', projectId)
       .order('created_at', { ascending: false });
 
@@ -195,7 +205,7 @@ router.get('/project/:projectId', authenticateToken, async (req: AuthRequest, re
       return res.status(500).json({ error: 'Failed to fetch project alerts' });
     }
 
-    res.json({ alerts: data || [] });
+    res.json({ alerts: (data || []).map(formatAlert) });
   } catch (error) {
     logger.error('Get project alerts error:', error);
     res.status(500).json({ error: 'Failed to fetch project alerts' });

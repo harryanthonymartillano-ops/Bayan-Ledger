@@ -39,7 +39,7 @@ interface AuthRequestWithFile extends AuthRequest {
   file?: Express.Multer.File;
 }
 
-const DOCUMENT_COLUMNS = 'id, project_id, milestone_id, title, name, type, url, storage_provider, file_format, size, verified, created_at';
+const DOCUMENT_COLUMNS = 'id, project_id, milestone_id, title, name, type, url, storage_provider, file_format, size, verified, date_uploaded, created_at';
 
 // Upload document
 router.post('/upload', authenticateToken, requireRole(['official', 'admin']), upload.single('document'), async (req: Request, res: Response) => {
@@ -55,13 +55,37 @@ router.post('/upload', authenticateToken, requireRole(['official', 'admin']), up
       return res.status(400).json({ error: 'Project ID and document type are required' });
     }
 
+    const checksumHash = crypto.createHash('sha256').update(authReq.file.buffer).digest('hex');
+
+    // Prevent duplicate document uploads for the same project / milestone
+    let existingQuery = supabase
+      .from('documents')
+      .select(DOCUMENT_COLUMNS)
+      .eq('project_id', projectId)
+      .eq('checksum_hash', checksumHash);
+
+    if (milestoneId) {
+      existingQuery = existingQuery.eq('milestone_id', milestoneId);
+    }
+
+    const { data: existingDoc } = await existingQuery.limit(1).maybeSingle();
+
+    if (existingDoc) {
+      logger.info('Duplicate document detected by checksum; reusing existing record:', {
+        projectId,
+        milestoneId,
+        checksumHash,
+        existingId: existingDoc.id,
+      });
+      return res.json({ document: existingDoc });
+    }
+
     const storedFile = await uploadFileBuffer(
       authReq.file.buffer,
       authReq.file.originalname,
       authReq.file.mimetype,
       `projects/${projectId}`
     );
-    const checksumHash = crypto.createHash('sha256').update(authReq.file.buffer).digest('hex');
     const fileFormat = authReq.file.originalname.includes('.')
       ? authReq.file.originalname.split('.').pop()?.toUpperCase()
       : undefined;
@@ -94,6 +118,20 @@ router.post('/upload', authenticateToken, requireRole(['official', 'admin']), up
     if (dbError) {
       logger.error('Database error:', dbError);
       return res.status(500).json({ error: 'Failed to save document metadata' });
+    }
+
+    if (milestoneId) {
+      const { count: reportCount } = await supabase
+        .from('documents')
+        .select('id', { count: 'exact', head: true })
+        .eq('milestone_id', milestoneId);
+
+      await supabase
+        .from('milestones')
+        .update({
+          evidence_report_count: reportCount || 1,
+        })
+        .eq('id', milestoneId);
     }
 
     clearProjectsCache(projectId);
@@ -145,7 +183,7 @@ router.delete('/:id', authenticateToken, requireRole(['official', 'admin']), asy
     // Get document info first
     const { data: document, error: fetchError } = await supabase
       .from('documents')
-      .select('id, project_id, storage_provider, cloudinary_id, storage_path, url, name')
+      .select('id, project_id, milestone_id, storage_provider, cloudinary_id, storage_path, url, name')
       .eq('id', id)
       .single();
 
@@ -169,6 +207,20 @@ router.delete('/:id', authenticateToken, requireRole(['official', 'admin']), asy
     if (deleteError) {
       logger.error('Database error:', deleteError);
       return res.status(500).json({ error: 'Failed to delete document' });
+    }
+
+    if (document.milestone_id) {
+      const { count: reportCount } = await supabase
+        .from('documents')
+        .select('id', { count: 'exact', head: true })
+        .eq('milestone_id', document.milestone_id);
+
+      await supabase
+        .from('milestones')
+        .update({
+          evidence_report_count: reportCount || 0,
+        })
+        .eq('id', document.milestone_id);
     }
 
     clearProjectsCache(document.project_id);

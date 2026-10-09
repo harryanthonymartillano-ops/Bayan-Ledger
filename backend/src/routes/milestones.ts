@@ -30,7 +30,7 @@ const photoUpload = multer({
   },
 });
 
-const MILESTONE_COLUMNS = 'id, project_id, title, description, percentage, status, budget, deliverables, due_date, date_verified, verified_by, photo_url, ipfs_hash, evidence_hash, report_hash, onchain_paid, blockchain_tx_hash, created_at';
+const MILESTONE_COLUMNS = 'id, project_id, title, description, percentage, status, budget, deliverables, due_date, date_verified, verified_by, verified_by_wallet, photo_url, ipfs_hash, evidence_hash, report_hash, evidence_photo_count, evidence_report_count, verification_data, onchain_verified_at, onchain_paid, blockchain_tx_hash, created_at';
 
 // Get milestones for a project
 router.get('/project/:projectId', authenticateToken, async (req: AuthRequest, res: Response) => {
@@ -196,6 +196,50 @@ router.post('/:id/verify', authenticateToken, requireRole(['official', 'admin'])
       verificationData?.evidenceHash
     );
 
+    // Query existing photos and documents to prevent blob URLs and guarantee accurate evidence counts
+    const { data: existingPhotos } = await supabase
+      .from('milestone_photos')
+      .select('id, milestone_id, project_id, photo_type, url, photo_hash, description, created_at')
+      .eq('milestone_id', id)
+      .order('created_at', { ascending: true });
+
+    const seenPhotoKeys = new Set<string>();
+    const photoList = (existingPhotos || []).filter((p) => {
+      const key = p.photo_hash || p.url || p.id;
+      if (!key || seenPhotoKeys.has(key)) return false;
+      seenPhotoKeys.add(key);
+      return true;
+    });
+    const photoCount = Math.max(photoList.length, Number(verificationData?.photoCount || 0));
+
+    const { data: milestoneDocs } = await supabase
+      .from('documents')
+      .select('id, checksum_hash, url, title, size')
+      .eq('milestone_id', id);
+
+    const seenDocKeys = new Set<string>();
+    const uniqueDocs = (milestoneDocs || []).filter((d) => {
+      const key = d.checksum_hash || (d.title && d.size ? `${d.title}_${d.size}` : d.url || d.id);
+      if (!key || seenDocKeys.has(key)) return false;
+      seenDocKeys.add(key);
+      return true;
+    });
+
+    const reportCount = Math.max(uniqueDocs.length, Number(verificationData?.reportCount || 0));
+
+    let effectivePhotoUrl = verificationData?.photoUrl;
+    if (!effectivePhotoUrl || typeof effectivePhotoUrl !== 'string' || effectivePhotoUrl.startsWith('blob:')) {
+      effectivePhotoUrl = photoList[0]?.url || null;
+    }
+
+    const sanitizedVerificationData = {
+      ...(verificationData || {}),
+      photoUrl: effectivePhotoUrl,
+      photos: photoList.length > 0 ? photoList : (verificationData?.photos || []),
+      photoCount,
+      reportCount,
+    };
+
     // Update milestone status
     const { data: milestone, error: updateError } = await supabase
       .from('milestones')
@@ -204,13 +248,13 @@ router.post('/:id/verify', authenticateToken, requireRole(['official', 'admin'])
         date_verified: verificationTimestamp,
         verified_by: req.user!.id,
         verified_by_wallet: req.user!.walletAddress || null,
-        verification_data: verificationData,
-        photo_url: verificationData?.photoUrl || null,
+        verification_data: sanitizedVerificationData,
+        photo_url: effectivePhotoUrl,
         ipfs_hash: verificationData?.ipfsHash || verificationData?.ipfs_hash || null,
         evidence_hash: verificationData?.evidenceHash || null,
         report_hash: verificationData?.reportHash || null,
-        evidence_photo_count: Number(verificationData?.photoCount || 0),
-        evidence_report_count: Number(verificationData?.reportCount || 0),
+        evidence_photo_count: photoCount,
+        evidence_report_count: reportCount,
         blockchain_tx_hash: milestoneVerificationHash,
         onchain_verified_at: verificationTimestamp,
       })
@@ -324,13 +368,32 @@ router.post('/:id/photos', authenticateToken, requireRole(['official', 'admin'])
       return res.status(400).json({ error: 'Milestone does not belong to the provided project' });
     }
 
+    const photoHash = crypto.createHash('sha256').update(uploadReq.file.buffer).digest('hex');
+
+    // Prevent duplicate photo upload for the same milestone
+    const { data: existingPhoto } = await supabase
+      .from('milestone_photos')
+      .select('id, milestone_id, project_id, photo_type, url, photo_hash, description, created_at')
+      .eq('milestone_id', id)
+      .eq('photo_hash', photoHash)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingPhoto) {
+      logger.info('Duplicate milestone photo detected by hash; reusing existing photo:', {
+        milestoneId: id,
+        photoHash,
+        existingId: existingPhoto.id,
+      });
+      return res.json({ photo: existingPhoto });
+    }
+
     const storedFile = await uploadFileBuffer(
       uploadReq.file.buffer,
       uploadReq.file.originalname,
       uploadReq.file.mimetype,
       `projects/${projectId}/milestones/${id}`
     );
-    const photoHash = crypto.createHash('sha256').update(uploadReq.file.buffer).digest('hex');
 
     const { data, error } = await supabase
       .from('milestone_photos')
@@ -352,6 +415,31 @@ router.post('/:id/photos', authenticateToken, requireRole(['official', 'admin'])
       logger.error('Milestone photo upload database error:', error);
       return res.status(500).json({ error: 'Failed to save milestone photo' });
     }
+
+    // Update milestone evidence_photo_count and primary photo_url if missing or blob
+    const { count: photoCount } = await supabase
+      .from('milestone_photos')
+      .select('id', { count: 'exact', head: true })
+      .eq('milestone_id', id);
+
+    const { data: currentMilestone } = await supabase
+      .from('milestones')
+      .select('photo_url')
+      .eq('id', id)
+      .single();
+
+    const milestoneUpdates: Record<string, any> = {
+      evidence_photo_count: photoCount || 1,
+    };
+
+    if (!currentMilestone?.photo_url || currentMilestone.photo_url.startsWith('blob:')) {
+      milestoneUpdates.photo_url = storedFile.url;
+    }
+
+    await supabase
+      .from('milestones')
+      .update(milestoneUpdates)
+      .eq('id', id);
 
     clearProjectsCache(projectId);
 

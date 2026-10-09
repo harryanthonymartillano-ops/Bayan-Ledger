@@ -431,21 +431,41 @@ const buildProjectTransparencyCsv = async (project: any) => {
   return rows.join('\n');
 };
 
+const deduplicateMilestonePhotos = (photos: any[]) => {
+  const seen = new Set<string>();
+  return (photos || []).filter((photo) => {
+    const key = photo.photo_hash || photo.url || photo.id;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const deduplicateDocuments = (docs: any[]) => {
+  const seen = new Set<string>();
+  return (docs || []).filter((doc) => {
+    const key = doc.checksum_hash || (doc.title && doc.size ? `${doc.title}_${doc.size}` : doc.url || doc.id);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 const attachProjectEvidence = async (project: any) => {
   const [{ data: milestones }, { data: documents }, { data: milestonePhotos }, { data: transactions }, comments] = await Promise.all([
     supabase
       .from('milestones')
-      .select('id, project_id, title, description, percentage, status, budget, deliverables, due_date, date_verified, verified_by, photo_url, ipfs_hash, evidence_hash, report_hash, onchain_paid, blockchain_tx_hash')
+      .select('id, project_id, title, description, percentage, status, budget, deliverables, due_date, date_verified, verified_by, verified_by_wallet, photo_url, ipfs_hash, evidence_hash, report_hash, evidence_photo_count, evidence_report_count, verification_data, onchain_verified_at, onchain_paid, blockchain_tx_hash, created_at')
       .eq('project_id', project.id)
       .order('due_date', { ascending: true }),
     supabase
       .from('documents')
-      .select('id, project_id, milestone_id, title, name, type, url, storage_provider, file_format, size, verified, created_at')
+      .select('id, project_id, milestone_id, title, name, type, url, storage_provider, file_format, size, verified, date_uploaded, checksum_hash, created_at')
       .eq('project_id', project.id)
       .order('created_at', { ascending: false }),
     supabase
       .from('milestone_photos')
-      .select('id, milestone_id, project_id, photo_type, url, description, created_at')
+      .select('id, milestone_id, project_id, photo_type, url, photo_hash, description, created_at')
       .eq('project_id', project.id)
       .order('created_at', { ascending: true }),
     supabase
@@ -463,17 +483,34 @@ const attachProjectEvidence = async (project: any) => {
     photosByMilestone.set(photo.milestone_id, current);
   }
 
+  const cleanDocuments = deduplicateDocuments(documents || []);
+
   return {
     ...project,
-    milestones: (milestones || []).map((milestone) => ({
-      ...milestone,
-      photos: photosByMilestone.get(milestone.id) || [],
-    })),
-    documents: documents || [],
+    milestones: (milestones || []).map((milestone) => {
+      const rawPhotos = photosByMilestone.get(milestone.id) || [];
+      const milestonePhotosList = deduplicateMilestonePhotos(rawPhotos);
+      const validPhotoUrl = (!milestone.photo_url || milestone.photo_url.startsWith('blob:'))
+        ? (milestonePhotosList[0]?.url || null)
+        : milestone.photo_url;
+      const milestoneDocs = cleanDocuments.filter((d: any) => d.milestone_id === milestone.id);
+      const photoCount = milestone.evidence_photo_count || milestonePhotosList.length;
+      const reportCount = milestone.evidence_report_count || milestoneDocs.length;
+
+      return {
+        ...milestone,
+        photo_url: validPhotoUrl,
+        photos: milestonePhotosList,
+        evidence_photo_count: photoCount,
+        evidence_report_count: reportCount,
+      };
+    }),
+    documents: cleanDocuments,
     transactions: transactions || [],
     comments,
   };
 };
+
 
 interface ProjectsCacheEntry {
   data: any;
@@ -515,12 +552,12 @@ const attachProjectsEvidenceBatch = async (projects: any[]) => {
   ] = await Promise.all([
     supabase
       .from('milestones')
-      .select('id, project_id, title, description, percentage, status, budget, deliverables, due_date, date_verified, verified_by, photo_url, ipfs_hash, evidence_hash, report_hash, onchain_paid, blockchain_tx_hash')
+      .select('id, project_id, title, description, percentage, status, budget, deliverables, due_date, date_verified, verified_by, verified_by_wallet, photo_url, ipfs_hash, evidence_hash, report_hash, evidence_photo_count, evidence_report_count, verification_data, onchain_verified_at, onchain_paid, blockchain_tx_hash, created_at')
       .in('project_id', projectIds)
       .order('due_date', { ascending: true }),
     supabase
       .from('documents')
-      .select('id, project_id, milestone_id, title, name, type, url, storage_provider, file_format, size, verified, created_at')
+      .select('id, project_id, milestone_id, title, name, type, url, storage_provider, file_format, size, verified, date_uploaded, checksum_hash, created_at')
       .in('project_id', projectIds)
       .order('created_at', { ascending: false }),
     supabase
@@ -530,7 +567,7 @@ const attachProjectsEvidenceBatch = async (projects: any[]) => {
       .order('created_at', { ascending: false }),
     supabase
       .from('milestone_photos')
-      .select('id, milestone_id, project_id, photo_type, url, description, created_at')
+      .select('id, milestone_id, project_id, photo_type, url, photo_hash, description, created_at')
       .in('project_id', projectIds)
       .order('created_at', { ascending: true }),
   ]);
@@ -539,6 +576,8 @@ const attachProjectsEvidenceBatch = async (projects: any[]) => {
   if (documentsError) logger.warn('Batch fetch documents warning:', documentsError);
   if (transactionsError) logger.warn('Batch fetch transactions warning:', transactionsError);
   if (photosError) logger.warn('Batch fetch milestone photos warning:', photosError);
+
+  const cleanDocuments = deduplicateDocuments(documents || []);
 
   const photosByMilestone = new Map<string, any[]>();
   for (const photo of milestonePhotos || []) {
@@ -550,15 +589,27 @@ const attachProjectsEvidenceBatch = async (projects: any[]) => {
   const milestonesByProject = new Map<string, any[]>();
   for (const milestone of milestones || []) {
     const current = milestonesByProject.get(milestone.project_id) || [];
+    const rawPhotos = photosByMilestone.get(milestone.id) || [];
+    const milestonePhotosList = deduplicateMilestonePhotos(rawPhotos);
+    const validPhotoUrl = (!milestone.photo_url || milestone.photo_url.startsWith('blob:'))
+      ? (milestonePhotosList[0]?.url || null)
+      : milestone.photo_url;
+    const projectDocs = cleanDocuments.filter((d: any) => d.project_id === milestone.project_id && d.milestone_id === milestone.id);
+    const photoCount = milestone.evidence_photo_count || milestonePhotosList.length;
+    const reportCount = milestone.evidence_report_count || projectDocs.length;
+
     current.push({
       ...milestone,
-      photos: photosByMilestone.get(milestone.id) || [],
+      photo_url: validPhotoUrl,
+      photos: milestonePhotosList,
+      evidence_photo_count: photoCount,
+      evidence_report_count: reportCount,
     });
     milestonesByProject.set(milestone.project_id, current);
   }
 
   const documentsByProject = new Map<string, any[]>();
-  for (const document of documents || []) {
+  for (const document of cleanDocuments) {
     const current = documentsByProject.get(document.project_id) || [];
     current.push(document);
     documentsByProject.set(document.project_id, current);

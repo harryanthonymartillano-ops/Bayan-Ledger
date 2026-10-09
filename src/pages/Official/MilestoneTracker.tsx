@@ -37,19 +37,31 @@ export const MilestoneTracker = () => {
 
   // Flatten milestones for easier display and stats
   const allMilestones = useMemo(() => {
-    return projects.flatMap((p) =>
-      p.milestones.map((m, index) => ({
-        ...m,
-        projectId: p.id,
-        projectName: p.name,
-        allocatedFunds: p.allocatedFunds,
-        isDelayed: isMilestoneDelayed(m),
-        canVerify:
-          p.allocatedFunds > 0 &&
-          (index === 0 || p.milestones[index - 1].status === 'Verified' || p.milestones[index - 1].status === 'Paid'),
-      }))
-    );
+    return projects.flatMap((p) => {
+      const projectDocs = p.documents || [];
+      return p.milestones.map((m, index) => {
+        const milestoneDocReports = projectDocs.filter(
+          (doc) => doc.milestoneId === m.id && (doc.type === 'Report' || doc.fileFormat === 'PDF' || doc.url?.toLowerCase().endsWith('.pdf'))
+        ).length;
+        const effectiveReportCount = m.evidenceReportCount || milestoneDocReports;
+        const effectivePhotoCount = m.evidencePhotoCount || (m.photos?.length || 0);
+
+        return {
+          ...m,
+          evidencePhotoCount: effectivePhotoCount,
+          evidenceReportCount: effectiveReportCount,
+          projectId: p.id,
+          projectName: p.name,
+          allocatedFunds: p.allocatedFunds,
+          isDelayed: isMilestoneDelayed(m),
+          canVerify:
+            p.allocatedFunds > 0 &&
+            (index === 0 || p.milestones[index - 1].status === 'Verified' || p.milestones[index - 1].status === 'Paid'),
+        };
+      });
+    });
   }, [projects]);
+
 
   // Executive summary counts
   const summary = useMemo(() => {
