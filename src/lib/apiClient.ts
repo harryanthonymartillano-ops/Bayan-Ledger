@@ -108,6 +108,7 @@ export const apiClient = {
     const queryStr = query.toString() ? `?${query.toString()}` : '?limit=20';
     return request(`/projects${queryStr}`, { token });
   },
+  getProject: (id: string, token?: string) => request(`/projects/${id}`, { token }),
   getProjectComments: (id: string) => request(`/projects/${id}/comments`),
   createProjectComment: (id: string, body: FormData) => request(`/projects/${id}/comments`, { method: 'POST', body }),
   getProjectTransparencySummary: (id: string) => request(`/projects/${id}/transparency-summary`),

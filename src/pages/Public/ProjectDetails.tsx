@@ -268,7 +268,31 @@ export const ProjectDetails = () => {
     setTimeout(() => setCopiedHash(null), 2000);
   };
 
-  const project = projects.find((item) => item.id === id) || (id ? getStoredProjectById(id) : null);
+  const [fetchedProject, setFetchedProject] = useState<any>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadProject = async () => {
+      if (!id) return;
+      try {
+        const response = (await apiClient.getProject(id)) as { project?: any };
+        if (!cancelled && response?.project) {
+          setFetchedProject(response.project);
+        }
+      } catch (err) {
+        console.warn('Could not load project directly by id:', err);
+      }
+    };
+
+    loadProject();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  const baseProject = projects.find((item) => item.id === id) || (id ? getStoredProjectById(id) : null);
+  const project = fetchedProject || baseProject;
   const displayProject = (project || {
     id,
     name: summary?.name || 'Project',
@@ -892,12 +916,19 @@ export const ProjectDetails = () => {
                 {displayProject.milestones.length > 0 ? (
                   <div className="space-y-5">
                     {displayProject.milestones.map((milestone: any, index: number) => {
-                      const rawMilestoneReports = displayProject.documents?.filter((doc: any) => doc.milestoneId === milestone.id) || [];
+                      const rawMilestoneReports = [
+                        ...(displayProject.documents?.filter((doc: any) =>
+                          (doc.milestoneId && doc.milestoneId === milestone.id) ||
+                          (doc.milestone_id && doc.milestone_id === milestone.id)
+                        ) || []),
+                        ...(Array.isArray(milestone.reports) ? milestone.reports : []),
+                        ...(Array.isArray(milestone.documents) ? milestone.documents : []),
+                      ];
                       const rawMilestonePhotos = milestone.photos || [];
 
                       const seenPhotoKeys = new Set<string>();
                       const milestonePhotos = rawMilestonePhotos.filter((photo: any) => {
-                        const key = photo.photoHash || photo.url?.split('?')[0] || photo.id;
+                        const key = photo.photoHash || photo.photo_hash || photo.url?.split('?')[0] || photo.id;
                         if (!key || seenPhotoKeys.has(key)) return false;
                         seenPhotoKeys.add(key);
                         return true;
@@ -905,7 +936,7 @@ export const ProjectDetails = () => {
 
                       const seenDocKeys = new Set<string>();
                       const milestoneReports = rawMilestoneReports.filter((doc: any) => {
-                        const key = doc.checksumHash || (doc.title && doc.size ? `${doc.title}_${doc.size}` : doc.url?.split('?')[0] || doc.id);
+                        const key = doc.checksumHash || doc.checksum_hash || (doc.title && doc.size ? `${doc.title}_${doc.size}` : doc.url?.split('?')[0] || doc.id);
                         if (!key || seenDocKeys.has(key)) return false;
                         seenDocKeys.add(key);
                         return true;
@@ -983,15 +1014,26 @@ export const ProjectDetails = () => {
                                   <div className="space-y-2">
                                     {milestoneReports.map((doc: any) => (
                                       <button
-                                        key={doc.id}
+                                        key={doc.id || doc.url}
                                         type="button"
-                                        onClick={() => openPreview([{ type: 'document', url: resolveAssetUrl(doc.url), title: doc.title }])}
+                                        onClick={() => openPreview([{
+                                          type: 'document',
+                                          url: resolveAssetUrl(doc.url),
+                                          title: doc.title || doc.name || 'Milestone Report',
+                                          fileFormat: doc.fileFormat || doc.file_format || (doc.url?.toLowerCase().endsWith('.pdf') ? 'PDF' : undefined),
+                                        }])}
                                         className="flex w-full items-start rounded-lg border border-slate-200 bg-[#fbfaf6] p-3 text-left transition-colors hover:bg-white"
                                       >
-                                        <FileText className="mr-3 mt-0.5 h-4 w-4 text-[#315b7d]" />
-                                        <div>
-                                          <div className="text-sm font-bold text-[#315b7d]">{doc.title}</div>
-                                          <div className="mt-1 text-xs text-slate-500">{safeFormatDate(doc.dateUploaded, 'MMM dd, yyyy')}</div>
+                                        <FileText className="mr-3 mt-0.5 h-4 w-4 shrink-0 text-[#315b7d]" />
+                                        <div className="min-w-0 flex-1">
+                                          <div className="truncate text-sm font-bold text-[#315b7d]">{doc.title || doc.name || 'Report'}</div>
+                                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                            <span>{safeFormatDate(doc.dateUploaded || doc.date_uploaded || doc.created_at, 'MMM dd, yyyy')}</span>
+                                            {doc.size ? <span>• {(Number(doc.size) / 1024).toFixed(1)} KB</span> : null}
+                                            <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-blue-800">
+                                              {doc.fileFormat || doc.file_format || 'PDF'}
+                                            </span>
+                                          </div>
                                         </div>
                                       </button>
                                     ))}
@@ -1009,6 +1051,44 @@ export const ProjectDetails = () => {
                 )}
               </CardContent>
             </Card>
+
+            {displayProject.documents && displayProject.documents.length > 0 && (
+              <Card className="rounded-lg border-slate-200 shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-2xl font-black text-[#17212b]">Project Documents & Reports</CardTitle>
+                  <CardDescription>All official documents, milestone reports, and verification files recorded on this project.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {displayProject.documents.map((doc: any, docIdx: number) => (
+                      <button
+                        key={doc.id || doc.url || docIdx}
+                        type="button"
+                        onClick={() => openPreview([{
+                          type: 'document',
+                          url: resolveAssetUrl(doc.url),
+                          title: doc.title || doc.name || 'Project Document',
+                          fileFormat: doc.fileFormat || doc.file_format || (doc.url?.toLowerCase().endsWith('.pdf') ? 'PDF' : undefined),
+                        }])}
+                        className="flex items-start rounded-lg border border-slate-200 bg-[#fbfaf6] p-3 text-left transition-colors hover:bg-white"
+                      >
+                        <FileText className="mr-3 mt-0.5 h-4 w-4 shrink-0 text-[#315b7d]" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-bold text-[#315b7d]">{doc.title || doc.name || 'Document'}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                            <span>{safeFormatDate(doc.dateUploaded || doc.date_uploaded || doc.created_at, 'MMM dd, yyyy')}</span>
+                            {doc.size ? <span>• {(Number(doc.size) / 1024).toFixed(1)} KB</span> : null}
+                            <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-blue-800">
+                              {doc.fileFormat || doc.file_format || 'PDF'}
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div className="space-y-8">

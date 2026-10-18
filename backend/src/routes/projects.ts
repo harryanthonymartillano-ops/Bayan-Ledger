@@ -431,10 +431,37 @@ const buildProjectTransparencyCsv = async (project: any) => {
   return rows.join('\n');
 };
 
+const normalizeDocument = (doc: any) => ({
+  ...doc,
+  id: doc.id,
+  projectId: doc.project_id || doc.projectId,
+  project_id: doc.project_id || doc.projectId,
+  milestoneId: doc.milestone_id || doc.milestoneId || null,
+  milestone_id: doc.milestone_id || doc.milestoneId || null,
+  title: doc.title || doc.name || 'Document',
+  name: doc.name || doc.title || 'Document',
+  type: doc.type || 'Report',
+  url: doc.url,
+  storageProvider: doc.storage_provider || doc.storageProvider || 'local',
+  storage_provider: doc.storage_provider || doc.storageProvider || 'local',
+  fileFormat: doc.file_format || doc.fileFormat || (doc.url?.toLowerCase().endsWith('.pdf') ? 'PDF' : undefined),
+  file_format: doc.file_format || doc.fileFormat || (doc.url?.toLowerCase().endsWith('.pdf') ? 'PDF' : undefined),
+  size: Number(doc.size || 0),
+  verified: Boolean(doc.verified),
+  dateUploaded: doc.date_uploaded || doc.dateUploaded || doc.created_at,
+  date_uploaded: doc.date_uploaded || doc.dateUploaded || doc.created_at,
+  checksumHash: doc.checksum_hash || doc.checksumHash || '',
+  checksum_hash: doc.checksum_hash || doc.checksumHash || '',
+  createdAt: doc.created_at || doc.createdAt,
+  created_at: doc.created_at || doc.createdAt,
+});
+
 const deduplicateMilestonePhotos = (photos: any[]) => {
   const seen = new Set<string>();
   return (photos || []).filter((photo) => {
-    const key = photo.photo_hash || photo.url || photo.id;
+    const milestoneScope = photo.milestone_id || photo.milestoneId || '';
+    const fileIdentifier = photo.photo_hash || photo.photoHash || photo.url || photo.id;
+    const key = `${milestoneScope}:${fileIdentifier}`;
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -444,11 +471,14 @@ const deduplicateMilestonePhotos = (photos: any[]) => {
 const deduplicateDocuments = (docs: any[]) => {
   const seen = new Set<string>();
   return (docs || []).filter((doc) => {
-    const key = doc.checksum_hash || (doc.title && doc.size ? `${doc.title}_${doc.size}` : doc.url || doc.id);
+    const projectScope = doc.project_id || doc.projectId || '';
+    const milestoneScope = doc.milestone_id || doc.milestoneId || 'general';
+    const fileIdentifier = doc.checksum_hash || (doc.title && doc.size ? `${doc.title}_${doc.size}` : doc.url || doc.id);
+    const key = `${projectScope}:${milestoneScope}:${fileIdentifier}`;
     if (!key || seen.has(key)) return false;
     seen.add(key);
     return true;
-  });
+  }).map(normalizeDocument);
 };
 
 const attachProjectEvidence = async (project: any) => {
@@ -493,7 +523,10 @@ const attachProjectEvidence = async (project: any) => {
       const validPhotoUrl = (!milestone.photo_url || milestone.photo_url.startsWith('blob:'))
         ? (milestonePhotosList[0]?.url || null)
         : milestone.photo_url;
-      const milestoneDocs = cleanDocuments.filter((d: any) => d.milestone_id === milestone.id);
+      const milestoneDocs = cleanDocuments.filter((d: any) =>
+        (d.project_id === project.id || d.projectId === project.id) &&
+        (d.milestone_id === milestone.id || d.milestoneId === milestone.id)
+      );
       const photoCount = milestone.evidence_photo_count || milestonePhotosList.length;
       const reportCount = milestone.evidence_report_count || milestoneDocs.length;
 
@@ -501,6 +534,8 @@ const attachProjectEvidence = async (project: any) => {
         ...milestone,
         photo_url: validPhotoUrl,
         photos: milestonePhotosList,
+        reports: milestoneDocs,
+        documents: milestoneDocs,
         evidence_photo_count: photoCount,
         evidence_report_count: reportCount,
       };
@@ -594,7 +629,10 @@ const attachProjectsEvidenceBatch = async (projects: any[]) => {
     const validPhotoUrl = (!milestone.photo_url || milestone.photo_url.startsWith('blob:'))
       ? (milestonePhotosList[0]?.url || null)
       : milestone.photo_url;
-    const projectDocs = cleanDocuments.filter((d: any) => d.project_id === milestone.project_id && d.milestone_id === milestone.id);
+    const projectDocs = cleanDocuments.filter((d: any) =>
+      (d.project_id === milestone.project_id || d.projectId === milestone.project_id) &&
+      (d.milestone_id === milestone.id || d.milestoneId === milestone.id)
+    );
     const photoCount = milestone.evidence_photo_count || milestonePhotosList.length;
     const reportCount = milestone.evidence_report_count || projectDocs.length;
 
@@ -602,6 +640,8 @@ const attachProjectsEvidenceBatch = async (projects: any[]) => {
       ...milestone,
       photo_url: validPhotoUrl,
       photos: milestonePhotosList,
+      reports: projectDocs,
+      documents: projectDocs,
       evidence_photo_count: photoCount,
       evidence_report_count: reportCount,
     });
@@ -610,9 +650,10 @@ const attachProjectsEvidenceBatch = async (projects: any[]) => {
 
   const documentsByProject = new Map<string, any[]>();
   for (const document of cleanDocuments) {
-    const current = documentsByProject.get(document.project_id) || [];
+    const projId = document.project_id || document.projectId;
+    const current = documentsByProject.get(projId) || [];
     current.push(document);
-    documentsByProject.set(document.project_id, current);
+    documentsByProject.set(projId, current);
   }
 
   const transactionsByProject = new Map<string, any[]>();

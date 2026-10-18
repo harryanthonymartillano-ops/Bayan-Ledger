@@ -34,6 +34,8 @@ export interface Milestone {
   onChainVerifiedAt?: string;
   onChainVerifiedBy?: string;
   onChainPaid?: boolean;
+  reports?: Document[];
+  documents?: Document[];
 }
 
 export interface MilestonePhoto {
@@ -727,24 +729,42 @@ const inferProjectStatus = (
   return 'MPDC Approved';
 };
 
-const mapDocumentFromApi = (document: any): Document => ({
-  id: document.id,
-  milestoneId: document.milestone_id || document.milestoneId || undefined,
-  title: document.title || document.name || 'Document',
-  type: document.type || 'Other',
-  url: document.url,
-  fileFormat: document.file_format || document.fileFormat || undefined,
-  uploadedBy: document.uploaded_by || document.uploadedBy || '',
-  dateUploaded: document.date_uploaded || document.created_at || new Date().toISOString(),
-  ipfsHash: document.ipfs_hash || document.ipfsHash || '',
-  size: Number(document.size || 0),
-  version: Number(document.version || 1),
-  previousVersion: document.previous_version || undefined,
-  verified: Boolean(document.verified),
-  verifiedBy: document.verified_by || undefined,
-  verifiedDate: document.verified_date || undefined,
-  checksumHash: document.checksum_hash || document.checksumHash || '',
-});
+const mapDocumentFromApi = (document: any): Document => {
+  const milestoneId = document.milestone_id || document.milestoneId || undefined;
+  const projectId = document.project_id || document.projectId || undefined;
+  const url = document.url || '';
+  const isPdf =
+    document.file_format?.toUpperCase() === 'PDF' ||
+    document.fileFormat?.toUpperCase() === 'PDF' ||
+    url.toLowerCase().includes('.pdf') ||
+    document.title?.toLowerCase().endsWith('.pdf') ||
+    document.name?.toLowerCase().endsWith('.pdf');
+
+  return {
+    id: document.id,
+    milestoneId,
+    milestone_id: milestoneId,
+    projectId,
+    project_id: projectId,
+    title: document.title || document.name || 'Document',
+    name: document.name || document.title || 'Document',
+    type: document.type || 'Other',
+    url,
+    fileFormat: isPdf ? 'PDF' : (document.file_format || document.fileFormat || undefined),
+    file_format: isPdf ? 'PDF' : (document.file_format || document.fileFormat || undefined),
+    uploadedBy: document.uploaded_by || document.uploadedBy || '',
+    dateUploaded: document.date_uploaded || document.dateUploaded || document.created_at || new Date().toISOString(),
+    date_uploaded: document.date_uploaded || document.dateUploaded || document.created_at || new Date().toISOString(),
+    ipfsHash: document.ipfs_hash || document.ipfsHash || '',
+    size: Number(document.size || 0),
+    version: Number(document.version || 1),
+    previousVersion: document.previous_version || undefined,
+    verified: Boolean(document.verified),
+    verifiedBy: document.verified_by || undefined,
+    verifiedDate: document.verified_date || undefined,
+    checksumHash: document.checksum_hash || document.checksumHash || '',
+  } as Document;
+};
 
 const mapMilestonePhotoFromApi = (photo: any): MilestonePhoto => ({
   id: photo.id,
@@ -800,6 +820,8 @@ const mapMilestoneFromApi = (milestone: any): Milestone => ({
   onChainVerifiedAt: milestone.onchain_verified_at || milestone.onChainVerifiedAt || undefined,
   onChainPaid: Boolean(milestone.onchain_paid ?? milestone.onChainPaid),
   photos: Array.isArray(milestone.photos) ? milestone.photos.map(mapMilestonePhotoFromApi) : [],
+  reports: Array.isArray(milestone.reports) ? milestone.reports.map(mapDocumentFromApi) : [],
+  documents: Array.isArray(milestone.documents) ? milestone.documents.map(mapDocumentFromApi) : [],
 });
 
 const normalizeMilestonePlan = (milestones: ProposalMilestonePlan[]) => milestones

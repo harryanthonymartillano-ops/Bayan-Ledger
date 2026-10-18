@@ -768,9 +768,10 @@ export const Dashboard = () => {
                 MPDC has initiated a pending transaction request. Sign it to move the status to <span className="font-semibold">1/2 Signed</span>.
               </p>
               <div className="rounded-lg bg-white dark:bg-[#121727] border border-amber-200/80 dark:border-amber-900/40 p-3 mb-3 text-sm text-slate-700 dark:text-slate-300">
-                <div className="font-medium text-slate-900 dark:text-white">{pendingBudgetRequest.description}</div>
+                {pendingBudgetRequest.description && (
+                  <div className="font-medium text-slate-900 dark:text-white">{pendingBudgetRequest.description}</div>
+                )}
                 <div className="mt-1 text-slate-700 dark:text-slate-300">Amount: {formatCurrency(pendingBudgetRequest.amount)}</div>
-                <div className="mt-1 text-slate-700 dark:text-slate-300">Contractor: <span className="font-mono text-xs text-slate-900 dark:text-slate-200">{pendingBudgetRequest.contractorAddress || 'N/A'}</span></div>
               </div>
               <form className="space-y-3" onSubmit={async (e) => {
                 e.preventDefault();
@@ -2293,20 +2294,26 @@ export const Dashboard = () => {
                     selectedProjectRecord.milestones.map(m => {
                       const milestoneDelayed = isMilestoneDelayed(m);
                       const rawMilestonePhotos = m.photos || [];
-                      const rawMilestoneReports =
-                        selectedProjectRecord.documents?.filter((doc: DashboardEvidenceDocument & { id?: string; milestoneId?: string }) => doc.milestoneId === m.id) || [];
+                      const rawMilestoneReports = [
+                        ...(selectedProjectRecord.documents?.filter((doc: any) =>
+                          (doc.milestoneId && doc.milestoneId === m.id) ||
+                          (doc.milestone_id && doc.milestone_id === m.id)
+                        ) || []),
+                        ...(Array.isArray((m as any).reports) ? (m as any).reports : []),
+                        ...(Array.isArray((m as any).documents) ? (m as any).documents : []),
+                      ];
 
                       const seenPhotoKeys = new Set<string>();
                       const milestonePhotos = rawMilestonePhotos.filter((p) => {
-                        const key = p.photoHash || p.url?.split('?')[0] || p.id;
+                        const key = p.photoHash || (p as any).photo_hash || p.url?.split('?')[0] || p.id;
                         if (!key || seenPhotoKeys.has(key)) return false;
                         seenPhotoKeys.add(key);
                         return true;
                       });
 
                       const seenDocKeys = new Set<string>();
-                      const milestoneReports = rawMilestoneReports.filter((doc) => {
-                        const key = doc.checksumHash || (doc.title && doc.size ? `${doc.title}_${doc.size}` : doc.url?.split('?')[0] || doc.id);
+                      const milestoneReports = rawMilestoneReports.filter((doc: any) => {
+                        const key = doc.checksumHash || doc.checksum_hash || (doc.title && doc.size ? `${doc.title}_${doc.size}` : doc.url?.split('?')[0] || doc.id);
                         if (!key || seenDocKeys.has(key)) return false;
                         seenDocKeys.add(key);
                         return true;
@@ -2382,7 +2389,7 @@ export const Dashboard = () => {
                                   <div>
                                     <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Reports</p>
                                     <div className="space-y-2">
-                                      {milestoneReports.map((doc, docIndex) => (
+                                      {milestoneReports.map((doc: any, docIndex: number) => (
                                         <button
                                           key={`${m.id}-report-${doc.id || doc.url || docIndex}`}
                                           type="button"
@@ -2391,8 +2398,8 @@ export const Dashboard = () => {
                                               [{
                                                 type: 'document',
                                                 url: resolveAssetUrl(doc.url),
-                                                title: doc.title,
-                                                fileFormat: doc.fileFormat,
+                                                title: doc.title || doc.name || `${m.title} Report`,
+                                                fileFormat: doc.fileFormat || doc.file_format || (doc.url?.toLowerCase().endsWith('.pdf') ? 'PDF' : undefined),
                                               }],
                                               0
                                             )
@@ -2400,10 +2407,16 @@ export const Dashboard = () => {
                                           className="flex w-full items-start rounded-lg border border-slate-200 dark:border-[#1e2334] bg-white dark:bg-[#181c2b] p-3 text-left shadow-sm transition-colors hover:border-blue-300 dark:hover:bg-[#1f2638]"
                                         >
                                           <FileText className="mr-3 mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                                          <span className="min-w-0">
-                                            <span className="block truncate text-sm font-bold text-blue-700 dark:text-blue-400">{doc.title}</span>
-                                            <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
-                                              {safeFormatDate(doc.dateUploaded, 'MMM dd, yyyy')}
+                                          <span className="min-w-0 flex-1">
+                                            <span className="block truncate text-sm font-bold text-blue-700 dark:text-blue-400">{doc.title || doc.name || 'Report'}</span>
+                                            <span className="mt-1 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                                              <span>
+                                                {safeFormatDate(doc.dateUploaded || doc.date_uploaded || doc.created_at, 'MMM dd, yyyy')}
+                                              </span>
+                                              {doc.size ? <span>• {(Number(doc.size) / 1024).toFixed(1)} KB</span> : null}
+                                              <span className="rounded bg-blue-100 dark:bg-blue-950 px-1.5 py-0.5 text-[10px] font-bold text-blue-700 dark:text-blue-300 uppercase">
+                                                {doc.fileFormat || doc.file_format || 'PDF'}
+                                              </span>
                                             </span>
                                           </span>
                                         </button>
@@ -2429,6 +2442,52 @@ export const Dashboard = () => {
                   )}
                 </div>
               </div>
+
+              {selectedProjectRecord?.documents && selectedProjectRecord.documents.length > 0 && (
+                <div className="mt-8 rounded-lg border border-slate-200 dark:border-[#1e2334] bg-white dark:bg-[#121520] p-5 shadow-sm">
+                  <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h3 className="text-xl font-black text-slate-950 dark:text-white">Project Documents & Reports</h3>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Official documentation, milestone proof reports, and archive files.</p>
+                    </div>
+                    <Badge variant="outline" className="w-fit bg-slate-50 dark:bg-[#181c2b] dark:text-slate-300 dark:border-[#1e2334]">
+                      {selectedProjectRecord.documents.length} document{selectedProjectRecord.documents.length === 1 ? '' : 's'}
+                    </Badge>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {selectedProjectRecord.documents.map((doc: any, docIndex: number) => (
+                      <button
+                        key={`proj-doc-${doc.id || doc.url || docIndex}`}
+                        type="button"
+                        onClick={() =>
+                          openSelectedProjectPreview(
+                            [{
+                              type: 'document',
+                              url: resolveAssetUrl(doc.url),
+                              title: doc.title || doc.name || 'Project Document',
+                              fileFormat: doc.fileFormat || doc.file_format || (doc.url?.toLowerCase().endsWith('.pdf') ? 'PDF' : undefined),
+                            }],
+                            0
+                          )
+                        }
+                        className="flex w-full items-start rounded-lg border border-slate-200 dark:border-[#1e2334] bg-slate-50/60 dark:bg-[#181c2b] p-3 text-left shadow-sm transition-colors hover:border-blue-300 dark:hover:bg-[#1f2638]"
+                      >
+                        <FileText className="mr-3 mt-0.5 h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-bold text-blue-700 dark:text-blue-400">{doc.title || doc.name || 'Document'}</span>
+                          <span className="mt-1 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                            <span>{safeFormatDate(doc.dateUploaded || doc.date_uploaded || doc.created_at, 'MMM dd, yyyy')}</span>
+                            {doc.size ? <span>• {(Number(doc.size) / 1024).toFixed(1)} KB</span> : null}
+                            <span className="rounded bg-blue-100 dark:bg-blue-950 px-1.5 py-0.5 text-[10px] font-bold text-blue-700 dark:text-blue-300 uppercase">
+                              {doc.fileFormat || doc.file_format || 'PDF'}
+                            </span>
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-8 rounded-lg border border-slate-200 dark:border-[#1e2334] bg-white dark:bg-[#121520] p-5 shadow-sm">
                 <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

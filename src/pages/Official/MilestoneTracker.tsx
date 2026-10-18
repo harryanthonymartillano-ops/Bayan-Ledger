@@ -41,7 +41,9 @@ export const MilestoneTracker = () => {
       const projectDocs = p.documents || [];
       return p.milestones.map((m, index) => {
         const milestoneDocReports = projectDocs.filter(
-          (doc) => doc.milestoneId === m.id && (doc.type === 'Report' || doc.fileFormat === 'PDF' || doc.url?.toLowerCase().endsWith('.pdf'))
+          (doc: any) =>
+            ((doc.milestoneId && doc.milestoneId === m.id) || (doc.milestone_id && doc.milestone_id === m.id)) &&
+            (doc.type === 'Report' || doc.fileFormat === 'PDF' || doc.file_format === 'PDF' || doc.url?.toLowerCase().endsWith('.pdf') || doc.title?.toLowerCase().endsWith('.pdf'))
         ).length;
         const effectiveReportCount = m.evidenceReportCount || milestoneDocReports;
         const effectivePhotoCount = m.evidencePhotoCount || (m.photos?.length || 0);

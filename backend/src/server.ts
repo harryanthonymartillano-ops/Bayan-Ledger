@@ -54,11 +54,9 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', (_req, res, next) => {
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.removeHeader('X-Frame-Options');
-  res.setHeader(
-    'Content-Security-Policy',
-    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https:; frame-ancestors *;"
-  );
+  res.setHeader('Content-Security-Policy', "frame-ancestors *;");
   next();
 });
 const uploadsDir = fs.existsSync(path.resolve(process.cwd(), 'uploads'))
