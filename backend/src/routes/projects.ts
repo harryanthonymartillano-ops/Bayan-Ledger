@@ -481,6 +481,173 @@ const deduplicateDocuments = (docs: any[]) => {
   }).map(normalizeDocument);
 };
 
+const normalizeMilestoneForApi = (milestone: any, rawPhotos: any[], cleanDocuments: any[], projectId: string) => {
+  const milestonePhotosList = deduplicateMilestonePhotos(rawPhotos).map((photo) => ({
+    ...photo,
+    id: photo.id,
+    type: photo.photo_type || photo.type || 'proof',
+    photo_type: photo.photo_type || photo.type || 'proof',
+    photoHash: photo.photo_hash || photo.photoHash || '',
+    photo_hash: photo.photo_hash || photo.photoHash || '',
+    url: photo.url,
+    description: photo.description || '',
+    capturedAt: photo.captured_at || photo.timestamp || photo.created_at || null,
+  }));
+
+  const validPhotoUrl = (!milestone.photo_url || milestone.photo_url.startsWith('blob:'))
+    ? (milestonePhotosList[0]?.url || null)
+    : milestone.photo_url;
+
+  const milestoneDocs = cleanDocuments.filter((d: any) =>
+    (d.project_id === projectId || d.projectId === projectId) &&
+    (d.milestone_id === milestone.id || d.milestoneId === milestone.id)
+  );
+
+  const photoCount = milestone.evidence_photo_count || milestonePhotosList.length;
+  const reportCount = milestone.evidence_report_count || milestoneDocs.length;
+
+  return {
+    ...milestone,
+    dueDate: milestone.due_date || milestone.dueDate || null,
+    due_date: milestone.due_date || milestone.dueDate || null,
+    dateVerified: milestone.date_verified || milestone.dateVerified || null,
+    date_verified: milestone.date_verified || milestone.dateVerified || null,
+    verifiedBy: milestone.verified_by || milestone.verifiedBy || null,
+    verified_by: milestone.verified_by || milestone.verifiedBy || null,
+    verifiedByWallet: milestone.verified_by_wallet || milestone.verifiedByWallet || null,
+    verified_by_wallet: milestone.verified_by_wallet || milestone.verifiedByWallet || null,
+    evidenceHash: milestone.evidence_hash || milestone.evidenceHash || null,
+    evidence_hash: milestone.evidence_hash || milestone.evidenceHash || null,
+    reportHash: milestone.report_hash || milestone.reportHash || null,
+    report_hash: milestone.report_hash || milestone.reportHash || null,
+    photoUrl: validPhotoUrl,
+    photo_url: validPhotoUrl,
+    photos: milestonePhotosList,
+    reports: milestoneDocs,
+    documents: milestoneDocs,
+    evidencePhotoCount: photoCount,
+    evidence_photo_count: photoCount,
+    evidenceReportCount: reportCount,
+    evidence_report_count: reportCount,
+  };
+};
+
+const normalizeTransactionForApi = (tx: any) => ({
+  ...tx,
+  amount: Number(tx.amount || 0),
+  recordedByRole: tx.recorded_by_role || tx.recordedByRole || null,
+  recorded_by_role: tx.recorded_by_role || tx.recordedByRole || null,
+  hash: tx.hash || tx.blockchain_tx_hash || tx.blockchainTxHash || null,
+  blockchainTxHash: tx.blockchain_tx_hash || tx.blockchainTxHash || tx.hash || null,
+  blockchain_tx_hash: tx.blockchain_tx_hash || tx.blockchainTxHash || tx.hash || null,
+  contractorWallet: tx.contractor_wallet || tx.contractorAddress || null,
+  contractor_wallet: tx.contractor_wallet || tx.contractorAddress || null,
+  budgetSignedAt: tx.budget_signed_at || tx.budgetSignedAt || null,
+  budget_signed_at: tx.budget_signed_at || tx.budgetSignedAt || null,
+  treasurerSignedAt: tx.treasurer_signed_at || tx.treasurerSignedAt || null,
+  treasurer_signed_at: tx.treasurer_signed_at || tx.treasurerSignedAt || null,
+  digitalSealHash: tx.digital_seal_hash || tx.digitalSealHash || null,
+  digital_seal_hash: tx.digital_seal_hash || tx.digitalSealHash || null,
+});
+
+const normalizeProjectForApi = (project: any, milestones: any[], documents: any[], transactions: any[], comments: any[] = []) => {
+  let totalBudget = normalizeNumber(project.total_budget ?? project.totalBudget);
+  let allocatedFunds = normalizeNumber(project.allocated_funds ?? project.allocatedFunds);
+  let disbursedFunds = normalizeNumber(project.disbursed_funds ?? project.disbursedFunds);
+
+  const normalizedTransactions = (transactions || []).map(normalizeTransactionForApi);
+
+  if (allocatedFunds === 0 && normalizedTransactions.length > 0) {
+    const saroTx = normalizedTransactions.find((t: any) => {
+      const type = String(t.type || '').toLowerCase();
+      return type.includes('allocation') || type.includes('saro');
+    });
+    if (saroTx && saroTx.amount > 0) {
+      allocatedFunds = saroTx.amount;
+    }
+  }
+
+  if (disbursedFunds === 0 && normalizedTransactions.length > 0) {
+    const ncaSum = normalizedTransactions
+      .filter((t: any) => {
+        const type = String(t.type || '').toLowerCase();
+        const status = String(t.status || '').toLowerCase();
+        return (type.includes('disbursement') || type.includes('nca')) && (status === 'executed' || status === 'completed');
+      })
+      .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+    if (ncaSum > 0) {
+      disbursedFunds = ncaSum;
+    }
+  }
+
+  if (totalBudget === 0 && allocatedFunds > 0) {
+    totalBudget = allocatedFunds;
+  }
+
+  const budgetSource = project.budget_source || project.budgetSource || null;
+  const startDate = project.start_date || project.startDate || null;
+  const endDate = project.end_date || project.endDate || null;
+  const createdAt = project.created_at || project.createdAt || null;
+  const locationPhotos = Array.isArray(project.location_photos) ? project.location_photos : (Array.isArray(project.locationPhotos) ? project.locationPhotos : []);
+  const metadataHash = project.metadata_hash || project.metadataHash || null;
+  const treasurySealHash = project.treasury_seal_hash || project.treasurySealHash || null;
+  const blockchainTxHash = project.blockchain_tx_hash || project.blockchainTxHash || null;
+  const createdByWallet = project.blockchain_created_by_wallet || project.createdByWallet || null;
+  const budgetOfficerWallet = project.budget_officer_wallet || project.budgetOfficerWallet || null;
+  const budgetOfficerSignedAt = project.budget_officer_signed_at || project.budgetOfficerSignedAt || null;
+  const treasurerWallet = project.treasurer_wallet || project.treasurerWallet || null;
+  const treasurerSignedAt = project.treasurer_signed_at || project.treasurerSignedAt || null;
+  const activatedAt = project.activated_at || project.activatedAt || null;
+  const latestDisbursementRef = project.latest_disbursement_ref || project.latestDisbursementRef || null;
+  const rejectionReason = project.rejection_reason || project.rejectionReason || null;
+
+  return {
+    ...project,
+    totalBudget,
+    total_budget: totalBudget,
+    allocatedFunds,
+    allocated_funds: allocatedFunds,
+    disbursedFunds,
+    disbursed_funds: disbursedFunds,
+    budgetSource,
+    budget_source: budgetSource,
+    startDate,
+    start_date: startDate,
+    endDate,
+    end_date: endDate,
+    createdAt,
+    created_at: createdAt,
+    locationPhotos,
+    location_photos: locationPhotos,
+    metadataHash,
+    metadata_hash: metadataHash,
+    treasurySealHash,
+    treasury_seal_hash: treasurySealHash,
+    blockchainTxHash,
+    blockchain_tx_hash: blockchainTxHash,
+    createdByWallet,
+    blockchain_created_by_wallet: createdByWallet,
+    budgetOfficerWallet,
+    budget_officer_wallet: budgetOfficerWallet,
+    budgetOfficerSignedAt,
+    budget_officer_signed_at: budgetOfficerSignedAt,
+    treasurerWallet,
+    treasurer_wallet: treasurerWallet,
+    treasurerSignedAt,
+    treasurer_signed_at: treasurerSignedAt,
+    activatedAt,
+    activated_at: activatedAt,
+    latestDisbursementRef,
+    latest_disbursement_ref: latestDisbursementRef,
+    rejectionReason,
+    rejection_reason: rejectionReason,
+    milestones,
+    documents,
+    transactions: normalizedTransactions,
+    comments,
+  };
+};
+
 const attachProjectEvidence = async (project: any) => {
   const [{ data: milestones }, { data: documents }, { data: milestonePhotos }, { data: transactions }, comments] = await Promise.all([
     supabase
@@ -514,36 +681,18 @@ const attachProjectEvidence = async (project: any) => {
   }
 
   const cleanDocuments = deduplicateDocuments(documents || []);
+  const normalizedMilestones = (milestones || []).map((m: any) => {
+    const rawPhotos = photosByMilestone.get(m.id) || [];
+    return normalizeMilestoneForApi(m, rawPhotos, cleanDocuments, project.id);
+  });
 
-  return {
-    ...project,
-    milestones: (milestones || []).map((milestone) => {
-      const rawPhotos = photosByMilestone.get(milestone.id) || [];
-      const milestonePhotosList = deduplicateMilestonePhotos(rawPhotos);
-      const validPhotoUrl = (!milestone.photo_url || milestone.photo_url.startsWith('blob:'))
-        ? (milestonePhotosList[0]?.url || null)
-        : milestone.photo_url;
-      const milestoneDocs = cleanDocuments.filter((d: any) =>
-        (d.project_id === project.id || d.projectId === project.id) &&
-        (d.milestone_id === milestone.id || d.milestoneId === milestone.id)
-      );
-      const photoCount = milestone.evidence_photo_count || milestonePhotosList.length;
-      const reportCount = milestone.evidence_report_count || milestoneDocs.length;
-
-      return {
-        ...milestone,
-        photo_url: validPhotoUrl,
-        photos: milestonePhotosList,
-        reports: milestoneDocs,
-        documents: milestoneDocs,
-        evidence_photo_count: photoCount,
-        evidence_report_count: reportCount,
-      };
-    }),
-    documents: cleanDocuments,
-    transactions: transactions || [],
-    comments,
-  };
+  return normalizeProjectForApi(
+    project,
+    normalizedMilestones,
+    cleanDocuments,
+    transactions || [],
+    comments || []
+  );
 };
 
 
@@ -636,15 +785,13 @@ const attachProjectsEvidenceBatch = async (projects: any[]) => {
     const photoCount = milestone.evidence_photo_count || milestonePhotosList.length;
     const reportCount = milestone.evidence_report_count || projectDocs.length;
 
-    current.push({
-      ...milestone,
-      photo_url: validPhotoUrl,
-      photos: milestonePhotosList,
-      reports: projectDocs,
-      documents: projectDocs,
-      evidence_photo_count: photoCount,
-      evidence_report_count: reportCount,
-    });
+    const normalizedMilestone = normalizeMilestoneForApi(
+      milestone,
+      rawPhotos,
+      cleanDocuments,
+      milestone.project_id
+    );
+    current.push(normalizedMilestone);
     milestonesByProject.set(milestone.project_id, current);
   }
 
@@ -663,13 +810,15 @@ const attachProjectsEvidenceBatch = async (projects: any[]) => {
     transactionsByProject.set(transaction.project_id, current);
   }
 
-  return projects.map((project) => ({
-    ...project,
-    milestones: milestonesByProject.get(project.id) || [],
-    documents: documentsByProject.get(project.id) || [],
-    transactions: transactionsByProject.get(project.id) || [],
-    comments: [],
-  }));
+  return projects.map((project) =>
+    normalizeProjectForApi(
+      project,
+      milestonesByProject.get(project.id) || [],
+      documentsByProject.get(project.id) || [],
+      transactionsByProject.get(project.id) || [],
+      []
+    )
+  );
 };
 
 router.get('/:id/comments', async (req: Request, res: Response) => {

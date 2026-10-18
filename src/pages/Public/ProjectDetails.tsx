@@ -70,6 +70,10 @@ type TransparencySummary = {
   latestDisbursementRef?: string | null;
   rejectionReason?: string | null;
   stages: TransparencyStage[];
+  totalBudget?: number;
+  allocatedFunds?: number;
+  disbursedFunds?: number;
+  createdAt?: string | null;
 };
 
 const deriveTransparencySummaryFromProject = (proj: any): TransparencySummary | null => {
@@ -121,10 +125,10 @@ const deriveTransparencySummaryFromProject = (proj: any): TransparencySummary | 
       actorWallet: proj.budget_officer_wallet || proj.budgetOfficerWallet || null,
       timestamp: proj.budget_officer_signed_at || proj.budgetOfficerSignedAt || null,
       reference: proj.saro || allocationTransaction?.saro || null,
-      amount: allocationTransaction ? Number(allocationTransaction.amount || 0) : Number(proj.allocatedFunds || 0),
+      amount: allocationTransaction ? Number(allocationTransaction.amount || 0) : Number(proj.allocatedFunds ?? proj.allocated_funds ?? 0),
       notes:
         proj.status === 'Rejected - Budget Officer'
-          ? proj.rejectionReason || 'Budget Officer rejected this project.'
+          ? proj.rejectionReason || proj.rejection_reason || 'Budget Officer rejected this project.'
           : allocationTransaction
             ? 'SARO created and first signature recorded.'
             : 'Awaiting SARO allocation review.',
@@ -148,10 +152,10 @@ const deriveTransparencySummaryFromProject = (proj: any): TransparencySummary | 
       actorWallet: proj.treasurer_wallet || proj.treasurerWallet || null,
       timestamp: proj.treasurer_signed_at || proj.treasurerSignedAt || null,
       reference: proj.treasury_seal_hash || proj.treasurySealHash || null,
-      amount: allocationTransaction ? Number(allocationTransaction.amount || 0) : Number(proj.allocatedFunds || 0),
+      amount: allocationTransaction ? Number(allocationTransaction.amount || 0) : Number(proj.allocatedFunds ?? proj.allocated_funds ?? 0),
       notes:
         proj.status === 'Rejected - Treasurer'
-          ? proj.rejectionReason || 'Treasurer rejected this project.'
+          ? proj.rejectionReason || proj.rejection_reason || 'Treasurer rejected this project.'
           : ['ACTIVE', 'In Progress', 'Completed'].includes(proj.status)
             ? 'Treasury activation complete. Digital seal of truth issued.'
             : proj.status === 'SARO Approved - Pending Treasurer'
@@ -181,7 +185,7 @@ const deriveTransparencySummaryFromProject = (proj: any): TransparencySummary | 
       actorWallet: null,
       timestamp: proj.activated_at || proj.activatedAt || null,
       reference: proj.latest_disbursement_ref || proj.latestDisbursementRef || null,
-      amount: Number(proj.disbursedFunds || 0),
+      amount: Number(proj.disbursedFunds ?? proj.disbursed_funds ?? 0),
       notes:
         proj.status === 'Completed'
           ? `All milestones and disbursements are complete. Paid milestones: ${paidMilestones}/${milestones.length}.`
@@ -197,15 +201,19 @@ const deriveTransparencySummaryFromProject = (proj: any): TransparencySummary | 
     projectId: proj.id,
     name: proj.name,
     status: proj.status,
-    metadataHash: proj.metadataHash || null,
-    createdByWallet: proj.createdByWallet || null,
-    budgetOfficerWallet: proj.budgetOfficerWallet || null,
-    treasurerWallet: proj.treasurerWallet || null,
-    treasurySealHash: proj.treasurySealHash || null,
-    saroRef: proj.saro || null,
-    latestDisbursementRef: proj.latestDisbursementRef || null,
-    rejectionReason: proj.rejectionReason || null,
+    metadataHash: proj.metadataHash || proj.metadata_hash || null,
+    createdByWallet: proj.createdByWallet || proj.blockchain_created_by_wallet || null,
+    budgetOfficerWallet: proj.budgetOfficerWallet || proj.budget_officer_wallet || null,
+    treasurerWallet: proj.treasurerWallet || proj.treasurer_wallet || null,
+    treasurySealHash: proj.treasurySealHash || proj.treasury_seal_hash || null,
+    saroRef: proj.saro || proj.saro_ref || proj.latest_saro_ref || null,
+    latestDisbursementRef: proj.latestDisbursementRef || proj.latest_disbursement_ref || null,
+    rejectionReason: proj.rejectionReason || proj.rejection_reason || null,
     stages,
+    totalBudget: Number(proj.totalBudget ?? proj.total_budget ?? 0),
+    allocatedFunds: Number(proj.allocatedFunds ?? proj.allocated_funds ?? 0),
+    disbursedFunds: Number(proj.disbursedFunds ?? proj.disbursed_funds ?? 0),
+    createdAt: proj.createdAt || proj.created_at || null,
   };
 };
 
@@ -220,6 +228,184 @@ type PublicComment = {
   content: string;
   created_at: string;
   photos?: PublicCommentPhoto[];
+};
+
+const normalizeProjectDetails = (raw: any): any => {
+  if (!raw) return null;
+
+  const rawMilestones = Array.isArray(raw.milestones) ? raw.milestones : [];
+  const rawTransactions = Array.isArray(raw.transactions) ? raw.transactions : [];
+  const rawDocuments = Array.isArray(raw.documents) ? raw.documents : [];
+
+  const transactions = rawTransactions.map((tx: any) => ({
+    ...tx,
+    id: tx.id,
+    type: tx.type || 'Disbursement (NCA)',
+    amount: Number(tx.amount || 0),
+    status: tx.status || 'Completed',
+    date: tx.date || tx.created_at || tx.createdAt,
+    recordedBy: tx.recorded_by || tx.recordedBy || 'System',
+    recordedByRole: tx.recorded_by_role || tx.recordedByRole || 'Treasurer',
+    recorded_by_role: tx.recorded_by_role || tx.recordedByRole || 'Treasurer',
+    hash: tx.hash || tx.blockchain_tx_hash || tx.blockchainTxHash || tx.request_tx_hash || tx.requestTxHash || tx.digital_seal_hash || tx.digitalSealHash || '',
+    blockchainTxHash: tx.blockchain_tx_hash || tx.blockchainTxHash || tx.hash || '',
+    saro: tx.saro || '',
+  }));
+
+  let totalBudget = Number(raw.total_budget ?? raw.totalBudget ?? 0);
+  let allocatedFunds = Number(raw.allocated_funds ?? raw.allocatedFunds ?? 0);
+  let disbursedFunds = Number(raw.disbursed_funds ?? raw.disbursedFunds ?? 0);
+
+  // If allocatedFunds is 0 but we have SARO transactions, recover amount
+  if (allocatedFunds === 0 && transactions.length > 0) {
+    const saroTx = transactions.find((t: any) => {
+      const type = String(t.type || '').toLowerCase();
+      return type.includes('allocation') || type.includes('saro');
+    });
+    if (saroTx && Number(saroTx.amount) > 0) {
+      allocatedFunds = Number(saroTx.amount);
+    }
+  }
+
+  // If disbursedFunds is 0 but we have executed NCA transactions, recover amount
+  if (disbursedFunds === 0 && transactions.length > 0) {
+    const ncaSum = transactions
+      .filter((t: any) => {
+        const type = String(t.type || '').toLowerCase();
+        const status = String(t.status || '').toLowerCase();
+        return (type.includes('disbursement') || type.includes('nca')) && (status === 'executed' || status === 'completed');
+      })
+      .reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+    if (ncaSum > 0) {
+      disbursedFunds = ncaSum;
+    }
+  }
+
+  // If totalBudget is 0 but allocatedFunds > 0, fallback to allocatedFunds
+  if (totalBudget === 0 && allocatedFunds > 0) {
+    totalBudget = allocatedFunds;
+  }
+
+  const milestones = rawMilestones.map((m: any) => {
+    const rawPhotos = Array.isArray(m.photos) ? m.photos : [];
+    const photos = rawPhotos.map((p: any) => ({
+      ...p,
+      id: p.id,
+      url: p.url,
+      type: p.photo_type || p.type || 'proof',
+      photo_type: p.photo_type || p.type || 'proof',
+      description: p.description || '',
+      photoHash: p.photo_hash || p.photoHash || '',
+    }));
+
+    const rawReports = [
+      ...(Array.isArray(m.reports) ? m.reports : []),
+      ...(Array.isArray(m.documents) ? m.documents : []),
+    ];
+
+    const reports = rawReports.map((d: any) => ({
+      ...d,
+      id: d.id,
+      title: d.title || d.name || 'Milestone Report',
+      url: d.url,
+      fileFormat: d.file_format || d.fileFormat || (d.url?.toLowerCase().endsWith('.pdf') ? 'PDF' : undefined),
+      size: Number(d.size || 0),
+      dateUploaded: d.date_uploaded || d.dateUploaded || d.created_at,
+    }));
+
+    return {
+      ...m,
+      id: m.id,
+      title: m.title || '',
+      description: m.description || '',
+      percentage: Number(m.percentage || 0),
+      status: m.status || 'Pending',
+      budget: Number(m.budget || 0),
+      deliverables: Array.isArray(m.deliverables) ? m.deliverables : [],
+      dueDate: m.due_date || m.dueDate || undefined,
+      due_date: m.due_date || m.dueDate || undefined,
+      dateVerified: m.date_verified || m.dateVerified || undefined,
+      date_verified: m.date_verified || m.dateVerified || undefined,
+      verifiedBy: m.verified_by || m.verifiedBy || undefined,
+      verified_by: m.verified_by || m.verifiedBy || undefined,
+      photoUrl: m.photo_url || m.photoUrl || (photos[0]?.url || undefined),
+      photo_url: m.photo_url || m.photoUrl || (photos[0]?.url || undefined),
+      photos,
+      reports,
+      documents: reports,
+    };
+  });
+
+  const locationPhotos = Array.isArray(raw.location_photos)
+    ? raw.location_photos
+    : Array.isArray(raw.locationPhotos)
+      ? raw.locationPhotos
+      : [];
+
+  const documents = rawDocuments.map((d: any) => ({
+    ...d,
+    id: d.id,
+    title: d.title || d.name || 'Project Document',
+    url: d.url,
+    fileFormat: d.file_format || d.fileFormat || (d.url?.toLowerCase().endsWith('.pdf') ? 'PDF' : undefined),
+    size: Number(d.size || 0),
+    dateUploaded: d.date_uploaded || d.dateUploaded || d.created_at,
+  }));
+
+  const stakeholders = Array.isArray(raw.stakeholders) ? raw.stakeholders : [];
+
+  return {
+    ...raw,
+    id: String(raw.id || ''),
+    name: raw.name || 'Unnamed Project',
+    description: raw.description || '',
+    location: raw.location || '',
+    category: raw.category || '',
+    budgetSource: raw.budget_source || raw.budgetSource || undefined,
+    budget_source: raw.budget_source || raw.budgetSource || undefined,
+    startDate: raw.start_date || raw.startDate || undefined,
+    start_date: raw.start_date || raw.startDate || undefined,
+    endDate: raw.end_date || raw.endDate || undefined,
+    end_date: raw.end_date || raw.endDate || undefined,
+    createdAt: raw.created_at || raw.createdAt || undefined,
+    created_at: raw.created_at || raw.createdAt || undefined,
+    totalBudget,
+    total_budget: totalBudget,
+    allocatedFunds,
+    allocated_funds: allocatedFunds,
+    disbursedFunds,
+    disbursed_funds: disbursedFunds,
+    status: raw.status || 'In Progress',
+    saro: raw.saro || raw.latest_saro_ref || raw.latestSaroRef || undefined,
+    metadataHash: raw.metadata_hash || raw.metadataHash || undefined,
+    metadata_hash: raw.metadata_hash || raw.metadataHash || undefined,
+    treasurySealHash: raw.treasury_seal_hash || raw.treasurySealHash || undefined,
+    treasury_seal_hash: raw.treasury_seal_hash || raw.treasurySealHash || undefined,
+    blockchainTxHash: raw.blockchain_tx_hash || raw.blockchainTxHash || undefined,
+    blockchain_tx_hash: raw.blockchain_tx_hash || raw.blockchainTxHash || undefined,
+    latestDisbursementRef: raw.latest_disbursement_ref || raw.latestDisbursementRef || undefined,
+    latest_disbursement_ref: raw.latest_disbursement_ref || raw.latestDisbursementRef || undefined,
+    createdByWallet: raw.blockchain_created_by_wallet || raw.createdByWallet || undefined,
+    blockchain_created_by_wallet: raw.blockchain_created_by_wallet || raw.createdByWallet || undefined,
+    budgetOfficerWallet: raw.budget_officer_wallet || raw.budgetOfficerWallet || undefined,
+    budget_officer_wallet: raw.budget_officer_wallet || raw.budgetOfficerWallet || undefined,
+    budgetOfficerSignedAt: raw.budget_officer_signed_at || raw.budgetOfficerSignedAt || undefined,
+    budget_officer_signed_at: raw.budget_officer_signed_at || raw.budgetOfficerSignedAt || undefined,
+    treasurerWallet: raw.treasurer_wallet || raw.treasurerWallet || undefined,
+    treasurer_wallet: raw.treasurer_wallet || raw.treasurerWallet || undefined,
+    treasurerSignedAt: raw.treasurer_signed_at || raw.treasurerSignedAt || undefined,
+    treasurer_signed_at: raw.treasurer_signed_at || raw.treasurerSignedAt || undefined,
+    activatedAt: raw.activated_at || raw.activatedAt || undefined,
+    activated_at: raw.activated_at || raw.activatedAt || undefined,
+    rejectionReason: raw.rejection_reason || raw.rejectionReason || undefined,
+    rejection_reason: raw.rejection_reason || raw.rejectionReason || undefined,
+    locationPhotos,
+    location_photos: locationPhotos,
+    stakeholders,
+    milestones,
+    transactions,
+    documents,
+  };
 };
 
 export const ProjectDetails = () => {
@@ -278,7 +464,7 @@ export const ProjectDetails = () => {
       try {
         const response = (await apiClient.getProject(id)) as { project?: any };
         if (!cancelled && response?.project) {
-          setFetchedProject(response.project);
+          setFetchedProject(normalizeProjectDetails(response.project));
         }
       } catch (err) {
         console.warn('Could not load project directly by id:', err);
@@ -291,30 +477,63 @@ export const ProjectDetails = () => {
     };
   }, [id]);
 
-  const baseProject = projects.find((item) => item.id === id) || (id ? getStoredProjectById(id) : null);
-  const project = fetchedProject || baseProject;
-  const displayProject = (project || {
-    id,
-    name: summary?.name || 'Project',
-    status: summary?.status || 'Unknown',
-    description: '',
-    location: '',
-    category: '',
-    budgetSource: '',
-    stakeholders: [],
-    locationPhotos: [],
-    totalBudget: 0,
-    allocatedFunds: 0,
-    disbursedFunds: 0,
-    milestones: [],
-    documents: [],
-    transactions: [],
-    saro: '',
-    startDate: '',
-    endDate: '',
-    metadataHash: '',
-    treasurySealHash: '',
-  }) as any;
+  const baseProject = useMemo(() => {
+    const fromContext = projects.find((item) => item.id === id);
+    if (fromContext) return normalizeProjectDetails(fromContext);
+    if (id) {
+      const stored = getStoredProjectById(id);
+      if (stored) return normalizeProjectDetails(stored);
+    }
+    return null;
+  }, [projects, id]);
+
+  const rawProject = fetchedProject || baseProject;
+  const displayProject = useMemo(() => {
+    const normalized = normalizeProjectDetails(rawProject);
+    if (normalized) {
+      if (normalized.totalBudget === 0 && summary?.totalBudget) {
+        normalized.totalBudget = summary.totalBudget;
+        normalized.total_budget = summary.totalBudget;
+      }
+      if (normalized.allocatedFunds === 0 && summary?.allocatedFunds) {
+        normalized.allocatedFunds = summary.allocatedFunds;
+        normalized.allocated_funds = summary.allocatedFunds;
+      }
+      if (normalized.disbursedFunds === 0 && summary?.disbursedFunds) {
+        normalized.disbursedFunds = summary.disbursedFunds;
+        normalized.disbursed_funds = summary.disbursedFunds;
+      }
+      if (!normalized.createdAt && summary?.createdAt) {
+        normalized.createdAt = summary.createdAt;
+        normalized.created_at = summary.createdAt;
+      }
+      return normalized;
+    }
+
+    return {
+      id: id || '',
+      name: summary?.name || 'Project',
+      status: summary?.status || 'Unknown',
+      description: '',
+      location: '',
+      category: '',
+      budgetSource: '',
+      stakeholders: [],
+      locationPhotos: [],
+      totalBudget: summary?.totalBudget || 0,
+      allocatedFunds: summary?.allocatedFunds || 0,
+      disbursedFunds: summary?.disbursedFunds || 0,
+      milestones: [],
+      documents: [],
+      transactions: [],
+      saro: summary?.saroRef || '',
+      startDate: '',
+      endDate: '',
+      createdAt: summary?.createdAt || '',
+      metadataHash: summary?.metadataHash || '',
+      treasurySealHash: summary?.treasurySealHash || '',
+    };
+  }, [rawProject, summary, id]);
 
   const projectTransactionHash = displayProject.transactions?.find((transaction: any) => transaction.hash)?.hash || displayProject.blockchainTxHash || null;
   const tamperingDetected = blockchainPrice !== null && isProjectTampered(displayProject.totalBudget, blockchainPrice);
@@ -617,7 +836,7 @@ export const ProjectDetails = () => {
     }
   };
 
-  if (attemptedLoad && !project && !summary) {
+  if (attemptedLoad && !rawProject && !summary) {
     return (
       <div className="mx-auto max-w-7xl px-4 py-16 text-center sm:px-6 lg:px-8">
         <h2 className="text-2xl font-black text-slate-900">Project Not Found</h2>
@@ -639,8 +858,8 @@ export const ProjectDetails = () => {
       value: projectDelayed ? 'Delayed' : 'On track',
       detail: pageMetrics.delayedMilestones > 0
         ? `${pageMetrics.delayedMilestones} overdue milestone${pageMetrics.delayedMilestones === 1 ? '' : 's'}`
-        : displayProject.endDate
-          ? `Target ${safeFormatDate(displayProject.endDate, 'MMM dd, yyyy')}`
+        : (displayProject.endDate || displayProject.end_date)
+          ? `Target ${safeFormatDate(displayProject.endDate || displayProject.end_date, 'MMM dd, yyyy')}`
           : 'No overdue dates',
       icon: AlertTriangle,
     },
@@ -682,12 +901,18 @@ export const ProjectDetails = () => {
                 </span>
                 <span className="inline-flex items-center">
                   <Calendar className="mr-1 h-3.5 w-3.5 text-slate-400" />
-                  Created {safeFormatDate(displayProject.createdAt, 'MMM dd, yyyy')}
+                  Created {safeFormatDate(displayProject.createdAt || displayProject.created_at, 'MMM dd, yyyy')}
                 </span>
-                {displayProject.endDate && (
+                {(displayProject.startDate || displayProject.start_date) && (
+                  <span className="inline-flex items-center">
+                    <Calendar className="mr-1 h-3.5 w-3.5 text-slate-400" />
+                    Started {safeFormatDate(displayProject.startDate || displayProject.start_date, 'MMM dd, yyyy')}
+                  </span>
+                )}
+                {(displayProject.endDate || displayProject.end_date) && (
                   <span className={projectDelayed ? 'inline-flex items-center font-bold text-red-700' : 'inline-flex items-center'}>
                     <Clock className="mr-1 h-3.5 w-3.5" />
-                    Target end {safeFormatDate(displayProject.endDate, 'MMM dd, yyyy')}
+                    Target end {safeFormatDate(displayProject.endDate || displayProject.end_date, 'MMM dd, yyyy')}
                   </span>
                 )}
               </div>
@@ -696,7 +921,7 @@ export const ProjectDetails = () => {
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-5">
               <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Total Project Budget</p>
               <p className="mt-1 text-3xl font-extrabold text-slate-900">{formatCurrency(displayProject.totalBudget)}</p>
-              <p className="mt-1 text-xs text-slate-500">{displayProject.budgetSource || 'Municipal Budget Allocation'}</p>
+              <p className="mt-1 text-xs text-slate-500">{displayProject.budgetSource || displayProject.budget_source || 'Municipal Budget Allocation'}</p>
             </div>
           </div>
 
@@ -796,12 +1021,12 @@ export const ProjectDetails = () => {
                             return (
                               <TableRow key={tx.id} className="hover:bg-slate-50/70">
                                 <TableCell className="whitespace-nowrap text-xs font-semibold text-slate-600">
-                                  {safeFormatDate(tx.date, 'MMM dd, yyyy HH:mm')}
+                                  {safeFormatDate(tx.date || tx.created_at, 'MMM dd, yyyy HH:mm')}
                                 </TableCell>
                                 <TableCell>
                                   <Badge
                                     className={
-                                      tx.type.includes('NCA')
+                                      (tx.type || '').includes('NCA')
                                         ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-100 font-bold'
                                         : 'bg-[#eff6fb] text-[#315b7d] hover:bg-[#eff6fb] font-bold'
                                     }
@@ -813,7 +1038,7 @@ export const ProjectDetails = () => {
                                   {formatCurrency(tx.amount)}
                                 </TableCell>
                                 <TableCell>
-                                  {getOfficerBadge(tx.recordedByRole)}
+                                  {getOfficerBadge(tx.recordedByRole || tx.recorded_by_role)}
                                 </TableCell>
                                 <TableCell>
                                   <div className="flex flex-wrap items-center gap-2">
@@ -871,7 +1096,7 @@ export const ProjectDetails = () => {
               </CardContent>
             </Card>
 
-            {displayProject.locationPhotos && displayProject.locationPhotos.length > 0 && (
+            {((displayProject.locationPhotos && displayProject.locationPhotos.length > 0) || (displayProject.location_photos && displayProject.location_photos.length > 0)) && (
               <Card className="rounded-lg border-slate-200 shadow-sm">
                 <CardHeader>
                   <CardTitle className="text-2xl font-black text-[#17212b]">Location Photos</CardTitle>
@@ -879,13 +1104,13 @@ export const ProjectDetails = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    {displayProject.locationPhotos.map((photoUrl: string, index: number) => (
+                    {(displayProject.locationPhotos || displayProject.location_photos || []).map((photoUrl: string, index: number) => (
                       <button
                         key={photoUrl}
                         type="button"
                         className="group overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-left shadow-sm"
                         onClick={() => openPreview(
-                          (displayProject.locationPhotos || []).map((url: string, itemIndex: number) => ({
+                          (displayProject.locationPhotos || displayProject.location_photos || []).map((url: string, itemIndex: number) => ({
                             type: 'image',
                             url: resolveAssetUrl(url),
                             title: `Location photo ${itemIndex + 1}`,
@@ -967,9 +1192,9 @@ export const ProjectDetails = () => {
                           <div className="mt-4 flex flex-wrap items-center gap-4 text-xs font-medium text-slate-500">
                             <span className={milestoneDelayed ? 'inline-flex items-center font-bold text-red-700' : 'inline-flex items-center'}>
                               <Calendar className="mr-1 h-3 w-3" />
-                              {milestone.dueDate ? `Target ${safeFormatDate(milestone.dueDate, 'MMM dd, yyyy')}` : 'Target date pending'}
+                              {(milestone.dueDate || milestone.due_date) ? `Target ${safeFormatDate(milestone.dueDate || milestone.due_date, 'MMM dd, yyyy')}` : 'Target date pending'}
                             </span>
-                            <span>{milestone.dateVerified ? `Verified ${safeFormatDate(milestone.dateVerified, 'MMM dd, yyyy')}` : 'Pending verification'}</span>
+                            <span>{(milestone.dateVerified || milestone.date_verified) ? `Verified ${safeFormatDate(milestone.dateVerified || milestone.date_verified, 'MMM dd, yyyy')}` : 'Pending verification'}</span>
                           </div>
 
                           {(milestonePhotos.length > 0 || milestoneReports.length > 0) && (
@@ -999,7 +1224,7 @@ export const ProjectDetails = () => {
                                           fallbackHeight="h-28"
                                         />
                                         <div className="p-2 text-xs text-slate-600">
-                                          <div className="font-bold capitalize text-slate-700">{photo.type}</div>
+                                          <div className="font-bold capitalize text-slate-700">{photo.type || photo.photo_type || 'Proof Photo'}</div>
                                           {photo.description && <div className="mt-1 line-clamp-2">{photo.description}</div>}
                                         </div>
                                       </button>
@@ -1095,21 +1320,80 @@ export const ProjectDetails = () => {
             <Card className="rounded-lg border-slate-200 shadow-sm">
               <CardHeader>
                 <CardTitle className="text-xl font-black text-[#17212b]">Project Details</CardTitle>
-                <CardDescription>Category and funding information.</CardDescription>
+                <CardDescription>Category, schedule, and public funding information.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="space-y-3.5">
                 {displayProject.category && (
                   <div className="rounded-lg border border-slate-200 bg-[#fbfaf6] p-3">
-                    <p className="text-xs font-black uppercase tracking-wide text-slate-500">Category</p>
-                    <p className="mt-2 font-bold text-slate-900">{displayProject.category}</p>
+                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Category</p>
+                    <p className="mt-1 font-bold text-slate-900">{displayProject.category}</p>
                   </div>
                 )}
-                {displayProject.budgetSource && (
-                  <div className="rounded-lg border border-[#d8c38f] bg-[#fff8e5] p-3">
-                    <p className="text-xs font-black uppercase tracking-wide text-[#71591d]">Budget Source</p>
-                    <p className="mt-2 font-bold text-[#71591d]">{displayProject.budgetSource}</p>
+                <div className="rounded-lg border border-[#d8c38f] bg-[#fff8e5] p-3">
+                  <p className="text-[11px] font-black uppercase tracking-wider text-[#71591d]">Budget Source</p>
+                  <p className="mt-1 font-bold text-[#71591d]">
+                    {displayProject.budgetSource || displayProject.budget_source || 'LGU - Municipal Budget Allocation'}
+                  </p>
+                </div>
+                {displayProject.location && (
+                  <div className="rounded-lg border border-slate-200 bg-[#fbfaf6] p-3">
+                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Project Location</p>
+                    <p className="mt-1 font-bold text-slate-900 flex items-center gap-1.5">
+                      <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                      {displayProject.location}
+                    </p>
                   </div>
                 )}
+                {(displayProject.startDate || displayProject.start_date || displayProject.endDate || displayProject.end_date || displayProject.createdAt || displayProject.created_at) && (
+                  <div className="rounded-lg border border-slate-200 bg-[#fbfaf6] p-3">
+                    <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Project Timeline</p>
+                    <div className="mt-2 space-y-1.5 text-xs">
+                      {(displayProject.createdAt || displayProject.created_at) && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500">Created:</span>
+                          <span className="font-semibold text-slate-800">{safeFormatDate(displayProject.createdAt || displayProject.created_at, 'MMM dd, yyyy')}</span>
+                        </div>
+                      )}
+                      {(displayProject.startDate || displayProject.start_date) && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500">Start Date:</span>
+                          <span className="font-semibold text-slate-800">{safeFormatDate(displayProject.startDate || displayProject.start_date, 'MMM dd, yyyy')}</span>
+                        </div>
+                      )}
+                      {(displayProject.endDate || displayProject.end_date) && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500">Target Completion:</span>
+                          <span className={`font-semibold ${projectDelayed ? 'text-red-700 font-bold' : 'text-slate-800'}`}>
+                            {safeFormatDate(displayProject.endDate || displayProject.end_date, 'MMM dd, yyyy')}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                <div className="rounded-lg border border-slate-200 bg-[#fbfaf6] p-3">
+                  <p className="text-[11px] font-black uppercase tracking-wider text-slate-500">Funding Summary</p>
+                  <div className="mt-2 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Total Budget:</span>
+                      <span className="font-bold text-slate-900">{formatCurrency(displayProject.totalBudget)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Allocated (SARO):</span>
+                      <span className="font-bold text-[#315b7d]">{formatCurrency(displayProject.allocatedFunds)}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Disbursed (NCA):</span>
+                      <span className="font-bold text-emerald-700">{formatCurrency(displayProject.disbursedFunds)}</span>
+                    </div>
+                    {(displayProject.saro || summary?.saroRef) && (
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-200">
+                        <span className="text-slate-500">SARO Ref:</span>
+                        <span className="font-mono text-[11px] font-bold text-slate-700">{displayProject.saro || summary?.saroRef}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </CardContent>
             </Card>
 

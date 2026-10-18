@@ -18,12 +18,16 @@ export const isPastDate = (dateString?: string | null) => {
   return date < today;
 };
 
-export const isMilestoneDelayed = (milestone: Pick<Milestone, 'dueDate' | 'status'>) => {
-  return isPastDate(milestone.dueDate) && !['Verified', 'Paid'].includes(milestone.status);
+export const isMilestoneDelayed = (milestone: any) => {
+  if (!milestone) return false;
+  const dueDate = milestone.dueDate || milestone.due_date;
+  return isPastDate(dueDate) && !['Verified', 'Paid'].includes(milestone.status);
 };
 
-export const isProjectDelayed = (project: Pick<Project, 'status' | 'endDate' | 'milestones'>) => {
-  if (project.status === 'Completed') return false;
+export const isProjectDelayed = (project: any) => {
+  if (!project || project.status === 'Completed') return false;
 
-  return isPastDate(project.endDate) || project.milestones.some(isMilestoneDelayed);
+  const endDate = project.endDate || project.end_date;
+  const milestones = Array.isArray(project.milestones) ? project.milestones : [];
+  return isPastDate(endDate) || milestones.some(isMilestoneDelayed);
 };
