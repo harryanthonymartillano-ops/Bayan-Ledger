@@ -2,7 +2,6 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { ethers } from 'ethers';
 import { supabase } from '../db/config';
 import { logger } from '../logger';
 import { authenticateToken, authenticateTokenAllowInactive, AuthRequest } from '../middleware/auth';
