@@ -166,6 +166,12 @@ create table if not exists public.project_comments (
   project_id text not null references public.projects(id) on delete cascade,
   display_name text not null default 'Anonymous',
   content text not null,
+  topic text not null default 'General Feedback',
+  helpful_count integer not null default 0,
+  insightful_count integer not null default 0,
+  is_flagged boolean not null default false,
+  status text not null default 'published',
+  ip_hash text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -209,6 +215,13 @@ alter table public.projects add column if not exists treasury_seal_hash text;
 alter table public.projects add column if not exists activated_at timestamptz;
 alter table public.projects add column if not exists budget_source text;
 alter table public.projects add column if not exists location_photos jsonb not null default '[]'::jsonb;
+
+alter table public.project_comments add column if not exists topic text not null default 'General Feedback';
+alter table public.project_comments add column if not exists helpful_count integer not null default 0;
+alter table public.project_comments add column if not exists insightful_count integer not null default 0;
+alter table public.project_comments add column if not exists is_flagged boolean not null default false;
+alter table public.project_comments add column if not exists status text not null default 'published';
+alter table public.project_comments add column if not exists ip_hash text;
 
 -- Create indexes for better query performance
 create index if not exists idx_projects_budget_source on public.projects(budget_source);
@@ -275,6 +288,9 @@ create index if not exists idx_documents_project_id on public.documents(project_
 
 create index if not exists idx_transactions_project_id on public.transactions(project_id);
 create index if not exists idx_project_comments_project_id on public.project_comments(project_id, created_at desc);
+create index if not exists idx_project_comments_status on public.project_comments(project_id, status, created_at desc);
+create index if not exists idx_project_comments_topic on public.project_comments(project_id, topic);
+create index if not exists idx_project_comments_flagged on public.project_comments(project_id, is_flagged);
 create index if not exists idx_project_comment_photos_comment_id on public.project_comment_photos(comment_id);
 create index if not exists idx_audit_logs_user_id on public.audit_logs(user_id);
 create index if not exists idx_audit_logs_resource on public.audit_logs(resource_type, resource_id);

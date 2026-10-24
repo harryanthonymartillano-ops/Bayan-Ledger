@@ -10,8 +10,35 @@ import { censorProfanity } from '../lib/profanityFilter';
 
 const router = Router();
 const PUBLIC_COMMENT_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
-const PUBLIC_COMMENT_RATE_LIMIT_MAX = 5;
-const publicCommentRateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+const PUBLIC_COMMENT_RATE_LIMIT_MAX = 8;
+const PUBLIC_COMMENT_COOLDOWN_MS = 10 * 1000;
+const PUBLIC_COMMENT_GLOBAL_WINDOW_MS = 60 * 1000;
+const PUBLIC_COMMENT_GLOBAL_MAX = 40;
+
+const publicCommentRateLimitBuckets = new Map<string, { count: number; resetAt: number; lastPostedAt?: number }>();
+let globalCommentSubmissions: number[] = [];
+const recentCommentHashes = new Map<string, number>();
+
+interface ProjectCommentsCacheEntry {
+  data: any[];
+  cachedAt: number;
+}
+const projectCommentsCache = new Map<string, ProjectCommentsCacheEntry>();
+const PROJECT_COMMENTS_CACHE_TTL_MS = 10 * 1000;
+
+export const invalidateProjectCommentsCache = (projectId: string) => {
+  projectCommentsCache.delete(projectId);
+};
+
+export const MIN_COMMENT_WORDS = 3;
+export const MAX_COMMENT_WORDS = 250;
+export const MIN_COMMENT_CHARS = 10;
+export const MAX_COMMENT_CHARS = 1500;
+export const MAX_NAME_CHARS = 40;
+
+export const countWords = (text: string): number => {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+};
 
 const publicCommentUpload = multer({
   storage: multer.memoryStorage(),
@@ -21,9 +48,26 @@ const publicCommentUpload = multer({
   },
 });
 
+const getClientIp = (req: Request): string => {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    const parts = forwarded.split(',');
+    if (parts[0]) return parts[0].trim();
+  }
+  if (Array.isArray(forwarded) && forwarded.length > 0 && typeof forwarded[0] === 'string') {
+    return forwarded[0].trim();
+  }
+  const realIp = req.headers['x-real-ip'];
+  if (typeof realIp === 'string' && realIp.trim()) {
+    return realIp.trim();
+  }
+  return req.ip || req.socket.remoteAddress || '127.0.0.1';
+};
+
 const getPublicCommentRateLimitKey = (req: Request) => {
+  const ip = getClientIp(req);
   const projectId = String(req.params.id || 'unknown');
-  return `${req.ip || req.socket.remoteAddress || 'unknown'}:${projectId}`;
+  return `${ip}:${projectId}`;
 };
 
 const prunePublicCommentRateLimitBuckets = (now: number) => {
@@ -32,32 +76,61 @@ const prunePublicCommentRateLimitBuckets = (now: number) => {
       publicCommentRateLimitBuckets.delete(key);
     }
   }
+  for (const [hash, timestamp] of recentCommentHashes) {
+    if (now - timestamp > 5 * 60 * 1000) {
+      recentCommentHashes.delete(hash);
+    }
+  }
 };
 
 const publicCommentRateLimit = (req: Request, res: Response, next: NextFunction) => {
   const now = Date.now();
   prunePublicCommentRateLimitBuckets(now);
 
+  // 1. Global traffic burst protection for public comments
+  globalCommentSubmissions = globalCommentSubmissions.filter((t) => now - t < PUBLIC_COMMENT_GLOBAL_WINDOW_MS);
+  if (globalCommentSubmissions.length >= PUBLIC_COMMENT_GLOBAL_MAX) {
+    res.setHeader('Retry-After', '15');
+    return res.status(429).json({
+      error: 'The public forum is experiencing unusually high commenting volume. Please wait 15 seconds and try again.',
+      retryAfter: 15,
+    });
+  }
+
   const key = getPublicCommentRateLimitKey(req);
   const currentBucket = publicCommentRateLimitBuckets.get(key);
   const bucket = currentBucket && currentBucket.resetAt > now
     ? currentBucket
-    : { count: 0, resetAt: now + PUBLIC_COMMENT_RATE_LIMIT_WINDOW_MS };
+    : { count: 0, resetAt: now + PUBLIC_COMMENT_RATE_LIMIT_WINDOW_MS, lastPostedAt: 0 };
+
+  // 2. Anti-spam rapid-fire cooldown (10s between posts from same client)
+  if (bucket.lastPostedAt && now - bucket.lastPostedAt < PUBLIC_COMMENT_COOLDOWN_MS) {
+    const cooldownRemaining = Math.max(1, Math.ceil((PUBLIC_COMMENT_COOLDOWN_MS - (now - bucket.lastPostedAt)) / 1000));
+    res.setHeader('Retry-After', String(cooldownRemaining));
+    return res.status(429).json({
+      error: `Please wait ${cooldownRemaining} second${cooldownRemaining === 1 ? '' : 's'} before posting another comment.`,
+      retryAfter: cooldownRemaining,
+    });
+  }
 
   const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
   res.setHeader('RateLimit-Limit', String(PUBLIC_COMMENT_RATE_LIMIT_MAX));
   res.setHeader('RateLimit-Remaining', String(Math.max(0, PUBLIC_COMMENT_RATE_LIMIT_MAX - bucket.count)));
   res.setHeader('RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)));
 
+  // 3. Per-IP window limit
   if (bucket.count >= PUBLIC_COMMENT_RATE_LIMIT_MAX) {
     res.setHeader('Retry-After', String(retryAfterSeconds));
     return res.status(429).json({
-      error: `Too many public comments. Please wait ${retryAfterSeconds} seconds before posting again.`,
+      error: `Too many comments for this project (${PUBLIC_COMMENT_RATE_LIMIT_MAX} per 10 minutes). Please wait ${retryAfterSeconds} seconds before posting again.`,
+      retryAfter: retryAfterSeconds,
     });
   }
 
   bucket.count += 1;
+  bucket.lastPostedAt = now;
   publicCommentRateLimitBuckets.set(key, bucket);
+  globalCommentSubmissions.push(now);
   res.setHeader('RateLimit-Remaining', String(Math.max(0, PUBLIC_COMMENT_RATE_LIMIT_MAX - bucket.count)));
 
   next();
@@ -129,12 +202,12 @@ const normalizeNumber = (value: unknown) => {
 const normalizePublicDisplayName = (value: unknown) => {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   if (!trimmed) return 'Anonymous';
-  return censorProfanity(trimmed).slice(0, 60);
+  return censorProfanity(trimmed).slice(0, MAX_NAME_CHARS);
 };
 
 const normalizePublicCommentContent = (value: unknown) => {
   const trimmed = typeof value === 'string' ? value.trim() : '';
-  return censorProfanity(trimmed).slice(0, 2000);
+  return censorProfanity(trimmed).slice(0, MAX_COMMENT_CHARS);
 };
 
 const isMissingRelationError = (error: any) => {
@@ -144,7 +217,15 @@ const isMissingRelationError = (error: any) => {
   return code === '42P01' || message.includes('relation') && message.includes('does not exist');
 };
 
-const fetchProjectComments = async (projectId: string) => {
+const fetchProjectComments = async (projectId: string, bypassCache = false) => {
+  const now = Date.now();
+  if (!bypassCache) {
+    const cached = projectCommentsCache.get(projectId);
+    if (cached && now - cached.cachedAt < PROJECT_COMMENTS_CACHE_TTL_MS) {
+      return cached.data;
+    }
+  }
+
   const [{ data: comments, error: commentsError }, { data: photos, error: photosError }] = await Promise.all([
     supabase
       .from('project_comments')
@@ -181,12 +262,24 @@ const fetchProjectComments = async (projectId: string) => {
     photosByComment.set(photo.comment_id, current);
   }
 
-  return (comments || []).map((comment) => ({
+  const mapped = (comments || []).map((comment) => ({
     ...comment,
     display_name: censorProfanity(comment.display_name || 'Anonymous'),
     content: censorProfanity(comment.content || ''),
+    topic: comment.topic || 'General Feedback',
+    helpful_count: Number(comment.helpful_count || 0),
+    insightful_count: Number(comment.insightful_count || 0),
+    is_flagged: Boolean(comment.is_flagged),
+    status: comment.status || 'published',
     photos: photosByComment.get(comment.id) || [],
   }));
+
+  projectCommentsCache.set(projectId, {
+    data: mapped,
+    cachedAt: now,
+  });
+
+  return mapped;
 };
 
 const deriveTransparencyStages = (project: any, transactions: any[], milestones: any[]) => {
@@ -858,8 +951,33 @@ router.post('/:id/comments', publicCommentRateLimit, publicCommentUpload.array('
       return res.status(400).json({ error: 'Project ID is required' });
     }
 
-    if (!content) {
-      return res.status(400).json({ error: 'Comment content is required' });
+    if (!content || content.length < MIN_COMMENT_CHARS) {
+      return res.status(400).json({
+        error: `Comment is too short. Please provide at least ${MIN_COMMENT_CHARS} characters.`,
+      });
+    }
+
+    const wordCount = countWords(content);
+    if (wordCount < MIN_COMMENT_WORDS) {
+      return res.status(400).json({
+        error: `Comment is too short (${wordCount} word${wordCount === 1 ? '' : 's'}). Please provide at least ${MIN_COMMENT_WORDS} words to share constructive feedback.`,
+      });
+    }
+
+    if (wordCount > MAX_COMMENT_WORDS) {
+      return res.status(400).json({
+        error: `Comment exceeds the limit of ${MAX_COMMENT_WORDS} words (${wordCount} words provided). Please shorten your comment.`,
+      });
+    }
+
+    // Duplicate detection within 5 minutes
+    const commentHash = `${id}:${crypto.createHash('sha256').update(content.toLowerCase().trim()).digest('hex')}`;
+    const previousSubmission = recentCommentHashes.get(commentHash);
+    const now = Date.now();
+    if (previousSubmission && now - previousSubmission < 5 * 60 * 1000) {
+      return res.status(400).json({
+        error: 'Duplicate comment detected. You have already posted this identical comment recently. Please provide new feedback.',
+      });
     }
 
     const { data: project, error } = await supabase
@@ -872,23 +990,59 @@ router.post('/:id/comments', publicCommentRateLimit, publicCommentUpload.array('
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    const { data: comment, error: commentError } = await supabase
+    const ipHash = crypto.createHash('sha256').update(getClientIp(req)).digest('hex');
+    const topic = typeof req.body.topic === 'string' && req.body.topic.trim()
+      ? req.body.topic.trim().slice(0, 60)
+      : 'General Feedback';
+
+    let comment: any = null;
+    let commentError: any = null;
+
+    // Attempt insert with enhanced columns (topic, ip_hash)
+    const enhancedInsert = await supabase
       .from('project_comments')
       .insert({
         project_id: id,
         display_name: displayName,
         content,
+        topic,
+        ip_hash: ipHash,
       })
       .select('*')
       .single();
+
+    if (enhancedInsert.error && enhancedInsert.error.message && enhancedInsert.error.message.includes('column')) {
+      // Fallback if alter table hasn't been executed in Supabase yet
+      const baseInsert = await supabase
+        .from('project_comments')
+        .insert({
+          project_id: id,
+          display_name: displayName,
+          content,
+        })
+        .select('*')
+        .single();
+      comment = baseInsert.data;
+      commentError = baseInsert.error;
+    } else {
+      comment = enhancedInsert.data;
+      commentError = enhancedInsert.error;
+    }
 
     if (commentError || !comment) {
       logger.error('Create public comment database error:', commentError);
       return res.status(500).json({ error: 'Failed to save public comment' });
     }
 
+    // Record duplicate hash
+    recentCommentHashes.set(commentHash, now);
+
     const photoRows: Record<string, unknown>[] = [];
     for (const file of files) {
+      if (!file.mimetype || !file.mimetype.startsWith('image/')) {
+        continue;
+      }
+
       const storedFile = await uploadFileBuffer(
         file.buffer,
         file.originalname,
@@ -921,24 +1075,75 @@ router.post('/:id/comments', publicCommentRateLimit, publicCommentUpload.array('
       }
     }
 
+    // Invalidate cached comments for this project so latest comments show immediately
+    invalidateProjectCommentsCache(id);
+
     await supabase.from('audit_logs').insert({
       action: 'PUBLIC_COMMENT_CREATED',
       resource_type: 'project',
       resource_id: id,
       details: {
         displayName,
+        wordCount,
         hasPhotos: photoRows.length > 0,
         photoCount: photoRows.length,
         preview: content.slice(0, 120),
       },
     });
 
-    const comments = await fetchProjectComments(id);
+    const comments = await fetchProjectComments(id, true);
     const createdComment = comments.find((entry) => entry.id === comment.id) || { ...comment, photos: [] };
-    res.status(201).json({ comment: createdComment });
+    res.status(201).json({
+      comment: createdComment,
+      wordCount,
+    });
   } catch (error) {
     logger.error('Create public comment error:', error);
     res.status(500).json({ error: 'Failed to create public comment' });
+  }
+});
+
+router.post('/:id/comments/:commentId/reaction', async (req: Request, res: Response) => {
+  try {
+    const { id, commentId } = req.params;
+    const type = req.body?.type === 'insightful' ? 'insightful_count' : 'helpful_count';
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from('project_comments')
+      .select(type)
+      .eq('id', commentId)
+      .single();
+
+    if (!fetchErr && existing) {
+      const record = existing as Record<string, any>;
+      const current = Number(record[type] || 0);
+      await supabase
+        .from('project_comments')
+        .update({ [type]: current + 1 })
+        .eq('id', commentId);
+    }
+
+    invalidateProjectCommentsCache(String(id));
+    res.json({ success: true });
+  } catch (error) {
+    logger.warn('Failed to persist comment reaction:', error);
+    res.json({ success: true, localOnly: true });
+  }
+});
+
+router.post('/:id/comments/:commentId/report', async (req: Request, res: Response) => {
+  try {
+    const { id, commentId } = req.params;
+    await supabase
+      .from('project_comments')
+      .update({ is_flagged: true })
+      .eq('id', commentId);
+
+    invalidateProjectCommentsCache(String(id));
+    res.json({ success: true, message: 'Comment flagged for moderation' });
+  } catch (error) {
+    logger.warn('Failed to update flagged status:', error);
+    res.json({ success: true, localOnly: true });
   }
 });
 

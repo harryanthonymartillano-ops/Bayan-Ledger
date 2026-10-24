@@ -111,6 +111,10 @@ export const apiClient = {
   getProject: (id: string, token?: string) => request(`/projects/${id}`, { token }),
   getProjectComments: (id: string) => request(`/projects/${id}/comments`),
   createProjectComment: (id: string, body: FormData) => request(`/projects/${id}/comments`, { method: 'POST', body }),
+  reactToComment: (projectId: string, commentId: string, type: 'helpful' | 'insightful') =>
+    request(`/projects/${projectId}/comments/${commentId}/reaction`, { method: 'POST', body: { type } }),
+  reportComment: (projectId: string, commentId: string) =>
+    request(`/projects/${projectId}/comments/${commentId}/report`, { method: 'POST' }),
   getProjectTransparencySummary: (id: string) => request(`/projects/${id}/transparency-summary`),
   getProposals: (token: string) => request('/proposals?limit=1000', { token }),
   createProject: (token: string, body: unknown) => request('/projects', { method: 'POST', token, body }),

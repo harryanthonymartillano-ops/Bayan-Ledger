@@ -30,8 +30,20 @@ import {
   SmilePlus,
   Sticker,
   User,
+  ThumbsUp,
+  Lightbulb,
+  Search,
+  Filter,
+  Flag,
+  X,
+  RefreshCw,
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { flashToast } from '../../components/ui/flash-toast';
 import apiClient, { API_BASE_URL } from '../../lib/apiClient';
 import { DatabaseBreachAlert } from '../../components/security/DatabaseBreachAlert';
 import { TamperingDetectedBadge } from '../../components/security/TamperingDetectedBadge';
@@ -430,7 +442,40 @@ export const ProjectDetails = () => {
   const [commentDisplayName, setCommentDisplayName] = useState('Anonymous');
   const [commentContent, setCommentContent] = useState('');
   const [commentPhotos, setCommentPhotos] = useState<File[]>([]);
+  const [commentTopic, setCommentTopic] = useState('General Feedback');
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
+  const [commentSearch, setCommentSearch] = useState('');
+  const [commentFilter, setCommentFilter] = useState('all');
+  const [commentSort, setCommentSort] = useState<'newest' | 'helpful' | 'oldest'>('newest');
+  const [visibleCommentsCount, setVisibleCommentsCount] = useState(6);
+  const [userReactions, setUserReactions] = useState<Record<string, { helpful?: boolean; insightful?: boolean }>>(() => {
+    if (!id || typeof window === 'undefined') return {};
+    try {
+      const raw = window.localStorage.getItem(`sta-cruz-reactions-${id}`);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [reportedComments, setReportedComments] = useState<string[]>(() => {
+    if (!id || typeof window === 'undefined') return [];
+    try {
+      const raw = window.localStorage.getItem(`sta-cruz-reported-comments-${id}`);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    if (cooldownSeconds <= 0) return;
+    const timer = setInterval(() => {
+      setCooldownSeconds((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldownSeconds]);
+
   const [blockchainPrice, setBlockchainPrice] = useState<number | null>(() => {
     if (!id) return null;
     if (chainBudgets && typeof chainBudgets[id] === 'number') {
@@ -802,39 +847,283 @@ export const ProjectDetails = () => {
     };
   }, [id]);
 
-  const handleCommentPhotoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || []).slice(0, 4);
-    setCommentPhotos(files);
+  const MIN_COMMENT_WORDS = 3;
+  const MAX_COMMENT_WORDS = 250;
+  const MIN_COMMENT_CHARS = 10;
+  const MAX_COMMENT_CHARS = 1500;
+
+  const countWords = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+
+  const parseCommentContent = (rawContent: string) => {
+    const match = (rawContent || '').match(/^\[Topic:\s*([^\]]+)\]\s*(.*)$/s);
+    if (match && match[1]) {
+      return {
+        topic: match[1].trim(),
+        text: match[2]?.trim() || '',
+      };
+    }
+    return {
+      topic: null,
+      text: rawContent || '',
+    };
   };
+
+  const formatRelativeTime = (dateString?: string | null) => {
+    if (!dateString) return 'Just now';
+    const date = new Date(dateString);
+    const time = date.getTime();
+    if (isNaN(time)) return 'Recently';
+    const diffSec = Math.floor((Date.now() - time) / 1000);
+    if (diffSec < 60) return 'Just now';
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+    if (diffSec < 86400 * 7) return `${Math.floor(diffSec / 86400)}d ago`;
+    return safeFormatDate(dateString, 'MMM dd, yyyy');
+  };
+
+  const getAvatarProps = (name: string) => {
+    const cleanName = (name || 'Anonymous').trim();
+    const initials = cleanName === 'Anonymous'
+      ? 'A'
+      : cleanName.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('');
+
+    const colors = [
+      'border-blue-200 bg-blue-100 text-blue-800',
+      'border-emerald-200 bg-emerald-100 text-emerald-800',
+      'border-amber-200 bg-amber-100 text-amber-800',
+      'border-purple-200 bg-purple-100 text-purple-800',
+      'border-rose-200 bg-rose-100 text-rose-800',
+      'border-teal-200 bg-teal-100 text-teal-800',
+      'border-indigo-200 bg-indigo-100 text-indigo-800',
+    ];
+
+    let sum = 0;
+    for (let i = 0; i < cleanName.length; i++) {
+      sum += cleanName.charCodeAt(i);
+    }
+    return {
+      initials: initials || 'C',
+      colorClass: colors[sum % colors.length] || colors[0]!,
+    };
+  };
+
+  const getTopicBadgeStyle = (topicName: string | null) => {
+    switch (topicName?.toLowerCase()) {
+      case 'progress & site update':
+      case 'progress & site':
+      case 'progress':
+        return 'bg-amber-100 text-amber-800 border-amber-300';
+      case 'budget & funds':
+      case 'budget & disbursement':
+      case 'budget':
+        return 'bg-blue-100 text-blue-800 border-blue-300';
+      case 'citizen concern':
+      case 'citizen concern / hazard':
+      case 'concern':
+        return 'bg-rose-100 text-rose-800 border-rose-300';
+      case 'commendation':
+      case 'appreciation':
+        return 'bg-emerald-100 text-emerald-800 border-emerald-300';
+      default:
+        return 'bg-slate-100 text-slate-700 border-slate-300';
+    }
+  };
+
+  const commentPhotoPreviews = useMemo(() => {
+    return commentPhotos.map((file) => ({
+      file,
+      url: URL.createObjectURL(file),
+    }));
+  }, [commentPhotos]);
+
+  useEffect(() => {
+    return () => {
+      commentPhotoPreviews.forEach((item) => URL.revokeObjectURL(item.url));
+    };
+  }, [commentPhotoPreviews]);
+
+  const handleCommentPhotoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files || []);
+    if (!selected.length) return;
+
+    const validImages = selected.filter((file) => {
+      if (!file.type.startsWith('image/')) {
+        flashToast.warning('Invalid File', `${file.name} is not an image file.`);
+        return false;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        flashToast.warning('File Too Large', `${file.name} exceeds the 5MB size limit.`);
+        return false;
+      }
+      return true;
+    });
+
+    setCommentPhotos((prev) => {
+      const combined = [...prev, ...validImages];
+      if (combined.length > 4) {
+        flashToast.info('Photo Limit', 'You can attach up to 4 photos per comment.');
+        return combined.slice(0, 4);
+      }
+      return combined;
+    });
+
+    event.target.value = '';
+  };
+
+  const handleRemovePhoto = (indexToRemove: number) => {
+    setCommentPhotos((prev) => prev.filter((_, i) => i !== indexToRemove));
+  };
+
+  const handleToggleReaction = (commentId: string, reactionType: 'helpful' | 'insightful') => {
+    setUserReactions((prev) => {
+      const current = prev[commentId] || {};
+      const updated = {
+        ...prev,
+        [commentId]: {
+          ...current,
+          [reactionType]: !current[reactionType],
+        },
+      };
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(`sta-cruz-reactions-${id}`, JSON.stringify(updated));
+        } catch {}
+      }
+      return updated;
+    });
+    if (id) {
+      apiClient.reactToComment(id, commentId, reactionType).catch(() => {});
+    }
+  };
+
+  const handleReportComment = (commentId: string) => {
+    if (reportedComments.includes(commentId)) return;
+    const updated = [...reportedComments, commentId];
+    setReportedComments(updated);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(`sta-cruz-reported-comments-${id}`, JSON.stringify(updated));
+      } catch {}
+    }
+    if (id) {
+      apiClient.reportComment(id, commentId).catch(() => {});
+    }
+    flashToast.info('Comment Flagged', 'Thank you. This comment has been flagged for municipal moderation.');
+  };
+
+  const commentWordCount = useMemo(() => countWords(commentContent), [commentContent]);
+  const commentCharCount = commentContent.length;
+  const isWordCountValid = commentWordCount >= MIN_COMMENT_WORDS && commentWordCount <= MAX_COMMENT_WORDS;
+  const isCharCountValid = commentCharCount >= MIN_COMMENT_CHARS && commentCharCount <= MAX_COMMENT_CHARS;
 
   const handleSubmitComment = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!id || !commentContent.trim()) return;
+    if (!id) return;
+
+    if (cooldownSeconds > 0) {
+      flashToast.warning('Cooldown Active', `Please wait ${cooldownSeconds}s before posting another comment.`);
+      return;
+    }
+
+    const trimmedContent = commentContent.trim();
+    if (!trimmedContent) {
+      setCommentsError('Please write a comment before posting.');
+      return;
+    }
+
+    if (trimmedContent.length < MIN_COMMENT_CHARS) {
+      setCommentsError(`Comment must be at least ${MIN_COMMENT_CHARS} characters.`);
+      return;
+    }
+
+    const words = countWords(trimmedContent);
+    if (words < MIN_COMMENT_WORDS) {
+      setCommentsError(`Comment is too short (${words} words). Please provide at least ${MIN_COMMENT_WORDS} words to share constructive feedback.`);
+      return;
+    }
+
+    if (words > MAX_COMMENT_WORDS) {
+      setCommentsError(`Comment exceeds the limit of ${MAX_COMMENT_WORDS} words (${words} words provided). Please shorten your comment.`);
+      return;
+    }
 
     try {
       setIsSubmittingComment(true);
       setCommentsError(null);
 
+      const contentWithTopic = commentTopic && commentTopic !== 'General Feedback'
+        ? `[Topic: ${commentTopic}] ${trimmedContent}`
+        : trimmedContent;
+
       const formData = new FormData();
       formData.append('displayName', censorProfanity(commentDisplayName.trim() || 'Anonymous'));
-      formData.append('content', censorProfanity(commentContent.trim()));
+      formData.append('content', censorProfanity(contentWithTopic));
+      formData.append('topic', commentTopic || 'General Feedback');
       commentPhotos.forEach((photo) => formData.append('photos', photo));
 
       const response = await apiClient.createProjectComment(id, formData) as { comment: PublicComment };
-      setComments((prev) => [{
+      const createdComment = {
         ...response.comment,
         display_name: censorProfanity(response.comment.display_name || 'Anonymous'),
         content: censorProfanity(response.comment.content || ''),
-      }, ...prev]);
+      };
+
+      setComments((prev) => [createdComment, ...prev]);
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(`sta-cruz-comments-${id}`, JSON.stringify([createdComment, ...comments]));
+        } catch {}
+      }
+
       setCommentContent('');
       setCommentPhotos([]);
       setCommentDisplayName('Anonymous');
+      setCommentTopic('General Feedback');
+      setCooldownSeconds(10);
+      flashToast.success('Comment Published', 'Your comment has been recorded on the public project board.');
     } catch (error: any) {
-      setCommentsError(error?.message || 'Failed to post comment.');
+      const errMsg = error?.message || 'Failed to post comment.';
+      setCommentsError(errMsg);
+      if (errMsg.toLowerCase().includes('wait') || errMsg.toLowerCase().includes('too many') || errMsg.toLowerCase().includes('volume') || errMsg.toLowerCase().includes('cooldown')) {
+        const match = errMsg.match(/(\d+)\s*second/i);
+        setCooldownSeconds(match ? parseInt(match[1]!, 10) : 15);
+      }
+      flashToast.error('Posting Notice', errMsg);
     } finally {
       setIsSubmittingComment(false);
     }
   };
+
+  const filteredComments = useMemo(() => {
+    return comments.filter((comment) => {
+      const parsed = parseCommentContent(comment.content);
+      if (commentFilter === 'photos' && (!comment.photos || comment.photos.length === 0)) {
+        return false;
+      }
+      if (commentFilter !== 'all' && commentFilter !== 'photos') {
+        if (parsed.topic?.toLowerCase() !== commentFilter.toLowerCase()) {
+          return false;
+        }
+      }
+      if (commentSearch.trim()) {
+        const query = commentSearch.toLowerCase();
+        const inName = (comment.display_name || '').toLowerCase().includes(query);
+        const inBody = parsed.text.toLowerCase().includes(query);
+        if (!inName && !inBody) return false;
+      }
+      return true;
+    }).sort((a, b) => {
+      if (commentSort === 'oldest') {
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      }
+      if (commentSort === 'helpful') {
+        const aHelpful = userReactions[a.id]?.helpful ? 1 : 0;
+        const bHelpful = userReactions[b.id]?.helpful ? 1 : 0;
+        return bHelpful - aHelpful || (new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      }
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+  }, [comments, commentFilter, commentSearch, commentSort, userReactions]);
 
   if (attemptedLoad && !rawProject && !summary) {
     return (
@@ -1485,130 +1774,493 @@ export const ProjectDetails = () => {
           </div>
         </div>
 
-        <Card className="mt-8 rounded-lg border-slate-200 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-2xl font-black text-[#17212b]">Public Comments</CardTitle>
-            <CardDescription>Anyone visiting this page can read the discussion and post a public comment without signing in.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <form onSubmit={handleSubmitComment} className="space-y-3">
-              <div className="flex items-start gap-3">
-                <div className="mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#d8c38f] bg-[#fff8e5] shadow-sm">
-                  <User className="h-5 w-5 text-[#71591d]" />
+        <Card className="mt-8 rounded-xl border-slate-200 bg-white shadow-sm overflow-hidden">
+          <CardHeader className="border-b border-slate-100 bg-[#fdfcf9] pb-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-2xl font-black text-[#17212b]">Public Comments & Community Voices</CardTitle>
+                  <span className="inline-flex items-center rounded-full bg-[#315b7d]/10 px-2.5 py-0.5 text-xs font-bold text-[#315b7d]">
+                    {comments.length} {comments.length === 1 ? 'Post' : 'Posts'}
+                  </span>
                 </div>
-                <div className="flex-1 rounded-lg bg-[#fbfaf6] px-4 py-3 ring-1 ring-slate-200">
-                  <textarea
-                    value={commentContent}
-                    onChange={(event) => setCommentContent(event.target.value)}
-                    maxLength={2000}
-                    required
-                    placeholder="Write a public comment..."
-                    className="min-h-[80px] w-full resize-none border-0 bg-transparent px-0 py-0 text-base text-slate-700 outline-none placeholder:text-slate-500 focus:ring-0"
+                <CardDescription className="mt-1 text-slate-500">
+                  Open civic feedback forum for Santa Cruz citizens and stakeholders. Anyone can participate without signing in.
+                </CardDescription>
+              </div>
+            </div>
+
+            <div className="mt-3 flex items-center gap-2 rounded-lg bg-blue-50/70 border border-blue-100 px-3 py-2 text-xs text-blue-900">
+              <ShieldCheck className="h-4 w-4 shrink-0 text-blue-600" />
+              <span>
+                <strong>Civic Discourse Guidelines:</strong> Public comments are permanently logged with audit integrity. Please ensure commentary is constructive, truthful, and relevant to this municipal project.
+              </span>
+            </div>
+          </CardHeader>
+
+          <CardContent className="space-y-6 pt-6">
+            {/* Comment Composer */}
+            <form onSubmit={handleSubmitComment} className="rounded-xl border border-slate-200 bg-[#fbfaf6] p-4 sm:p-5 shadow-sm space-y-4">
+              <div className="flex items-center justify-between gap-2 border-b border-slate-200/70 pb-3">
+                <span className="text-xs font-black uppercase tracking-wider text-slate-600">New Public Comment</span>
+                <span className="text-xs text-slate-500">Limits: 3–250 words • Max 1,500 chars</span>
+              </div>
+
+              {/* Name and Topic Selector */}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-black uppercase tracking-wide text-slate-600">
+                    Public Name or Alias
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={commentDisplayName}
+                      onChange={(event) => setCommentDisplayName(event.target.value)}
+                      maxLength={40}
+                      placeholder="Anonymous"
+                      className="rounded-lg border-slate-200 bg-white text-sm"
+                    />
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-1 text-[11px] text-slate-400">
+                    <span>Quick alias:</span>
+                    {['Anonymous', 'Local Resident', 'Daily Commuter', 'Sta. Cruz Taxpayer'].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setCommentDisplayName(preset)}
+                        className="font-medium text-[#315b7d] hover:underline"
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-black uppercase tracking-wide text-slate-600">
+                    Comment Category / Topic
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { label: 'General Feedback', icon: '💬' },
+                      { label: 'Progress & Site Update', icon: '🏗️' },
+                      { label: 'Budget & Funds', icon: '💰' },
+                      { label: 'Citizen Concern', icon: '⚠️' },
+                      { label: 'Commendation', icon: '👏' },
+                    ].map((topic) => (
+                      <button
+                        key={topic.label}
+                        type="button"
+                        onClick={() => setCommentTopic(topic.label)}
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition ${
+                          commentTopic === topic.label
+                            ? 'bg-[#315b7d] text-white shadow-sm ring-2 ring-[#315b7d]/20'
+                            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span>{topic.icon}</span>
+                        <span>{topic.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Textarea with active character and word counts */}
+              <div className="relative rounded-lg border border-slate-300 bg-white p-3 shadow-inner transition focus-within:border-[#315b7d] focus-within:ring-2 focus-within:ring-[#315b7d]/15">
+                <textarea
+                  value={commentContent}
+                  onChange={(event) => setCommentContent(event.target.value)}
+                  maxLength={1500}
+                  required
+                  placeholder="Share your feedback, site observations, or questions about this project..."
+                  className="min-h-[100px] w-full resize-none border-0 bg-transparent p-0 text-sm leading-relaxed text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0"
+                />
+
+                {/* Live Progress Bar for Word Limit */}
+                <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className={`h-full transition-all duration-300 ${
+                      commentWordCount > 250
+                        ? 'bg-rose-500'
+                        : commentWordCount >= 220
+                        ? 'bg-amber-500'
+                        : commentWordCount >= 3
+                        ? 'bg-[#315b7d]'
+                        : 'bg-slate-300'
+                    }`}
+                    style={{ width: `${Math.min(100, Math.max(3, (commentWordCount / 250) * 100))}%` }}
                   />
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-3">
-                    <div className="flex items-center gap-2 text-slate-500">
-                      <label className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg transition hover:bg-white hover:text-slate-700" title="Add photo">
-                        <ImagePlus className="h-4 w-4" />
-                        <input type="file" accept="image/*" multiple onChange={handleCommentPhotoChange} className="hidden" />
-                      </label>
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg transition hover:bg-white hover:text-slate-700" title="Reaction style">
-                        <SmilePlus className="h-4 w-4" />
-                      </div>
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg transition hover:bg-white hover:text-slate-700" title="Sticker style">
-                        <Sticker className="h-4 w-4" />
-                      </div>
-                      <div className="flex h-8 w-8 items-center justify-center rounded-lg transition hover:bg-white hover:text-slate-700" title="Visibility">
-                        <CircleDot className="h-4 w-4" />
-                      </div>
-                    </div>
+                </div>
+
+                {/* Real-time word and character stats */}
+                <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-1 rounded px-2 py-0.5 font-bold ${
+                        commentWordCount === 0
+                          ? 'bg-slate-100 text-slate-500'
+                          : commentWordCount < 3
+                          ? 'bg-amber-100 text-amber-800'
+                          : commentWordCount <= 220
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : commentWordCount <= 250
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-rose-100 text-rose-700'
+                      }`}
+                    >
+                      {commentWordCount === 0 ? (
+                        '0 / 250 words (min 3)'
+                      ) : commentWordCount < 3 ? (
+                        <>
+                          <AlertCircle className="h-3 w-3" /> Need at least 3 words ({commentWordCount}/3)
+                        </>
+                      ) : commentWordCount <= 220 ? (
+                        <>
+                          <CheckCircle2 className="h-3 w-3" /> {commentWordCount} / 250 words
+                        </>
+                      ) : commentWordCount <= 250 ? (
+                        <>
+                          <AlertCircle className="h-3 w-3" /> {250 - commentWordCount} words left
+                        </>
+                      ) : (
+                        <>
+                          <AlertCircle className="h-3 w-3" /> Exceeds limit by {commentWordCount - 250} words!
+                        </>
+                      )}
+                    </span>
+
+                    <span className="text-slate-400">
+                      {commentCharCount} / 1500 chars
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <label
+                      className={`inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-slate-900 ${
+                        commentPhotos.length >= 4 ? 'opacity-50 cursor-not-allowed' : ''
+                      }`}
+                      title={commentPhotos.length >= 4 ? 'Maximum 4 photos allowed' : 'Attach proof or site photos'}
+                    >
+                      <ImagePlus className="h-3.5 w-3.5 text-[#315b7d]" />
+                      <span>Attach Photos ({commentPhotos.length}/4)</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        disabled={commentPhotos.length >= 4}
+                        onChange={handleCommentPhotoChange}
+                        className="hidden"
+                      />
+                    </label>
+
                     <button
                       type="submit"
-                      disabled={isSubmittingComment || !commentContent.trim()}
-                      className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#315b7d] text-white transition hover:bg-[#264966] disabled:cursor-not-allowed disabled:opacity-60"
-                      title="Post comment"
+                      disabled={isSubmittingComment || cooldownSeconds > 0 || !commentContent.trim() || !isWordCountValid || !isCharCountValid}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#315b7d] px-4 py-1.5 text-xs font-bold text-white shadow-sm transition hover:bg-[#264966] disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <Send className="h-4 w-4" />
+                      {isSubmittingComment ? (
+                        <>
+                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          <span>Posting...</span>
+                        </>
+                      ) : cooldownSeconds > 0 ? (
+                        <>
+                          <Clock className="h-3.5 w-3.5" />
+                          <span>Wait {cooldownSeconds}s</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="h-3.5 w-3.5" />
+                          <span>Post Comment</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3 pl-14 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex-1">
-                  <label className="mb-1 block text-xs font-black uppercase tracking-wide text-slate-500">Public Name</label>
-                  <Input
-                    value={commentDisplayName}
-                    onChange={(event) => setCommentDisplayName(event.target.value)}
-                    maxLength={60}
-                    placeholder="Anonymous"
-                    className="max-w-xs rounded-lg border-slate-200 bg-white"
-                  />
-                </div>
-                <div className="text-xs text-slate-400">{commentContent.length}/2000</div>
-              </div>
-
-              {commentPhotos.length > 0 && (
-                <div className="grid grid-cols-2 gap-2 pl-14 sm:grid-cols-4">
-                  {commentPhotos.map((photo, index) => (
-                    <div key={`${photo.name}-${index}`} className="rounded-lg border border-slate-200 bg-[#fbfaf6] px-3 py-2 text-xs text-slate-600">
-                      <div className="truncate font-bold text-slate-700">{photo.name}</div>
-                      <div>{Math.round(photo.size / 1024)} KB</div>
-                    </div>
-                  ))}
+              {/* Photo Previews with Delete Button */}
+              {commentPhotoPreviews.length > 0 && (
+                <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                    <span>Attached Photos ({commentPhotoPreviews.length}/4)</span>
+                    <span className="text-[11px] text-slate-400">Click &times; to remove before posting</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    {commentPhotoPreviews.map((item, index) => (
+                      <div
+                        key={`${item.file.name}-${index}`}
+                        className="group relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50 shadow-sm"
+                      >
+                        <img
+                          src={item.url}
+                          alt={item.file.name}
+                          className="h-24 w-full object-cover transition group-hover:scale-105"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePhoto(index)}
+                          className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-rose-600 text-white shadow hover:bg-rose-700 transition"
+                          title="Remove photo"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                        <div className="p-1.5 text-[10px] text-slate-600 bg-white">
+                          <div className="truncate font-semibold text-slate-800">{item.file.name}</div>
+                          <div>{Math.round(item.file.size / 1024)} KB</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
-              {commentsError && <div className="ml-14 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{commentsError}</div>}
-              <p className="pl-14 text-xs text-slate-500">Everyone can see other citizens&apos; comments on this page. Leave the name as Anonymous or customize it.</p>
+              {/* Anti-spam cooldown alert banner */}
+              {cooldownSeconds > 0 && (
+                <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  <Clock className="h-4 w-4 shrink-0 text-amber-600" />
+                  <span>
+                    <strong>Posting cooldown active:</strong> To prevent server congestion and spam bursts, you can post another comment in <strong>{cooldownSeconds} second{cooldownSeconds === 1 ? '' : 's'}</strong>.
+                  </span>
+                </div>
+              )}
+
+              {/* Error Alert */}
+              {commentsError && (
+                <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
+                  <span>{commentsError}</span>
+                </div>
+              )}
             </form>
 
+            {/* Comments Control Toolbar (Search, Topic Filter, Sort) */}
+            <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-[#fbfaf6] p-3 sm:flex-row sm:items-center sm:justify-between">
+              {/* Search Bar */}
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                <Input
+                  value={commentSearch}
+                  onChange={(e) => setCommentSearch(e.target.value)}
+                  placeholder="Search comments or commenter..."
+                  className="h-8 pl-8 text-xs bg-white border-slate-200 rounded-lg"
+                />
+                {commentSearch && (
+                  <button
+                    onClick={() => setCommentSearch('')}
+                    className="absolute right-2 top-2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Filter and Sort controls */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <Filter className="h-3.5 w-3.5 text-slate-400" />
+                  <select
+                    value={commentFilter}
+                    onChange={(e) => setCommentFilter(e.target.value)}
+                    className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-[#315b7d]"
+                  >
+                    <option value="all">All Topics ({comments.length})</option>
+                    <option value="photos">With Photos Only</option>
+                    <option value="Progress & Site Update">Progress & Site Updates</option>
+                    <option value="Budget & Funds">Budget Inquiries</option>
+                    <option value="Citizen Concern">Citizen Concerns</option>
+                    <option value="Commendation">Commendations</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <SlidersHorizontal className="h-3.5 w-3.5 text-slate-400" />
+                  <select
+                    value={commentSort}
+                    onChange={(e) => setCommentSort(e.target.value as 'newest' | 'helpful' | 'oldest')}
+                    className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-semibold text-slate-700 outline-none focus:border-[#315b7d]"
+                  >
+                    <option value="newest">Newest First</option>
+                    <option value="helpful">Most Helpful</option>
+                    <option value="oldest">Oldest First</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Comments List */}
             <div className="space-y-4">
               {commentsLoading ? (
-                <div className="rounded-lg border border-slate-200 bg-[#fbfaf6] p-4 text-sm text-slate-500">Loading public comments...</div>
-              ) : comments.length > 0 ? (
-                comments.map((comment) => (
-                  <div key={comment.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="font-bold text-slate-900">{censorProfanity(comment.display_name || 'Anonymous')}</div>
-                        <div className="text-xs text-slate-500">{safeFormatDate(comment.created_at, 'MMM dd, yyyy HH:mm')}</div>
+                <div className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-[#fbfaf6] p-8 text-sm text-slate-500">
+                  <RefreshCw className="h-4 w-4 animate-spin text-[#315b7d]" />
+                  <span>Loading public comments...</span>
+                </div>
+              ) : filteredComments.length > 0 ? (
+                <>
+                  {filteredComments.slice(0, visibleCommentsCount).map((comment) => {
+                    const parsed = parseCommentContent(comment.content);
+                    const avatar = getAvatarProps(comment.display_name);
+                    const isReported = reportedComments.includes(comment.id);
+                    const userReaction = userReactions[comment.id] || {};
+
+                    return (
+                      <div
+                        key={comment.id}
+                        className={`rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm transition hover:shadow-md ${
+                          isReported ? 'opacity-60 bg-slate-50/50' : ''
+                        }`}
+                      >
+                        {/* Header: Avatar, Name, Topic Badge, Time */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3">
+                            <div
+                              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border font-black text-sm shadow-sm ${avatar.colorClass}`}
+                            >
+                              {avatar.initials}
+                            </div>
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="font-bold text-slate-900">
+                                  {censorProfanity(comment.display_name || 'Anonymous')}
+                                </span>
+                                <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                                  Citizen Post
+                                </span>
+                                {parsed.topic && (
+                                  <span
+                                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold ${getTopicBadgeStyle(
+                                      parsed.topic
+                                    )}`}
+                                  >
+                                    {parsed.topic}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="mt-0.5 text-xs text-slate-400" title={safeFormatDate(comment.created_at, 'MMMM dd, yyyy HH:mm')}>
+                                {formatRelativeTime(comment.created_at)}
+                              </div>
+                            </div>
+                          </div>
+
+                          {isReported ? (
+                            <Badge className="border-amber-200 bg-amber-50 text-amber-700 text-[10px]">
+                              Flagged for Moderation
+                            </Badge>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleReportComment(comment.id)}
+                              className="text-slate-400 hover:text-rose-600 text-[11px] inline-flex items-center gap-1 transition"
+                              title="Flag inappropriate comment"
+                            >
+                              <Flag className="h-3 w-3" />
+                              <span className="hidden sm:inline">Report</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Comment Body */}
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                          {censorProfanity(parsed.text)}
+                        </p>
+
+                        {/* Attached Photos */}
+                        {comment.photos && comment.photos.length > 0 && (
+                          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                            {comment.photos.map((photo, photoIndex) => (
+                              <button
+                                key={photo.id}
+                                type="button"
+                                onClick={() =>
+                                  openPreview(
+                                    (comment.photos || []).map((item, itemIndex) => ({
+                                      type: 'image',
+                                      url: resolveAssetUrl(item.url),
+                                      title: `Citizen photo attachment ${itemIndex + 1}`,
+                                    })),
+                                    photoIndex
+                                  )
+                                }
+                                className="group relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50 transition hover:border-[#315b7d]"
+                              >
+                                <ProjectImageThumbnail
+                                  src={resolveAssetUrl(photo.url)}
+                                  alt="Citizen comment photo"
+                                  className="h-32 w-full object-cover transition group-hover:scale-105"
+                                  fallbackHeight="h-32"
+                                />
+                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition" />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Reactions and Helpful Votes */}
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleReaction(comment.id, 'helpful')}
+                              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition ${
+                                userReaction.helpful
+                                  ? 'border-[#315b7d] bg-[#315b7d]/10 text-[#315b7d]'
+                                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                              }`}
+                            >
+                              <ThumbsUp className="h-3.5 w-3.5" />
+                              <span>Helpful</span>
+                              <span className="font-bold">{userReaction.helpful ? 1 : 0}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleToggleReaction(comment.id, 'insightful')}
+                              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition ${
+                                userReaction.insightful
+                                  ? 'border-amber-300 bg-amber-50 text-amber-800'
+                                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                              }`}
+                            >
+                              <Lightbulb className="h-3.5 w-3.5" />
+                              <span>Insightful</span>
+                              <span className="font-bold">{userReaction.insightful ? 1 : 0}</span>
+                            </button>
+                          </div>
+
+                          <div className="text-[11px] text-slate-400">
+                            Logged on Public Ledger
+                          </div>
+                        </div>
                       </div>
-                      <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">Citizen Post</Badge>
+                    );
+                  })}
+
+                  {/* Load More Pagination */}
+                  {filteredComments.length > visibleCommentsCount && (
+                    <div className="pt-2 text-center">
+                      <button
+                        type="button"
+                        onClick={() => setVisibleCommentsCount((prev) => prev + 6)}
+                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 shadow-sm transition hover:bg-slate-50 hover:border-slate-300"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                        <span>Show More Comments ({filteredComments.length - visibleCommentsCount} remaining)</span>
+                      </button>
                     </div>
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{censorProfanity(comment.content)}</p>
-                    {comment.photos && comment.photos.length > 0 && (
-                      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        {comment.photos.map((photo, photoIndex) => (
-                          <button
-                            key={photo.id}
-                            type="button"
-                            onClick={() => openPreview(
-                              (comment.photos || []).map((item, itemIndex) => ({
-                                type: 'image',
-                                url: resolveAssetUrl(item.url),
-                                title: `Citizen comment attachment ${itemIndex + 1}`,
-                              })),
-                              photoIndex
-                            )}
-                            className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
-                          >
-                            <ProjectImageThumbnail
-                              src={resolveAssetUrl(photo.url)}
-                              alt="Citizen comment attachment"
-                              className="h-48 w-full object-cover"
-                              fallbackHeight="h-48"
-                            />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))
+                  )}
+                </>
               ) : (
-                <div className="rounded-lg border border-dashed border-slate-300 bg-[#fbfaf6] p-6 text-center">
-                  <MessageSquare className="mx-auto h-6 w-6 text-slate-400" />
-                  <p className="mt-3 text-sm font-bold text-slate-700">No comments yet</p>
-                  <p className="mt-1 text-sm text-slate-500">Be the first citizen to share an update about this project.</p>
+                <div className="rounded-xl border border-dashed border-slate-300 bg-[#fbfaf6] p-8 text-center">
+                  <MessageSquare className="mx-auto h-8 w-8 text-slate-400" />
+                  <p className="mt-3 text-sm font-bold text-slate-700">
+                    {commentSearch || commentFilter !== 'all' ? 'No matching comments found' : 'No comments yet'}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {commentSearch || commentFilter !== 'all'
+                      ? 'Try clearing the search or topic filters.'
+                      : 'Be the first Santa Cruz citizen to share feedback or attach site updates!'}
+                  </p>
                 </div>
               )}
             </div>
