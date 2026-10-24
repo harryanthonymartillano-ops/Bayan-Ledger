@@ -96,6 +96,11 @@ export const apiClient = {
     token,
     body: { walletAddress, signature },
   }),
+  updateThemePreference: (token: string, theme: 'light' | 'dark') => request<{ success: boolean; theme: 'light' | 'dark'; warning?: string }>('/auth/theme', {
+    method: 'PATCH',
+    token,
+    body: { theme },
+  }),
 
 
   getProjects: (token?: string, options?: { page?: number; limit?: number; status?: string; category?: string; location?: string }) => {

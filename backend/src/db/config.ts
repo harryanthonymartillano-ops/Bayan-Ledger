@@ -46,6 +46,17 @@ export async function initializeDatabase() {
     }
 
     console.log('Supabase schema verified successfully');
+
+    // Non-blocking check for theme_preference column on users table
+    const { error: themeColError } = await supabase.from('users').select('theme_preference').limit(1);
+    if (themeColError) {
+      console.warn(
+        `[Database Notice] Column 'theme_preference' is not yet present on 'users' table. ` +
+        `To persist official light/dark theme in Supabase across devices, run 'backend/supabase/migrations/20261025_add_theme_preference.sql' in the Supabase SQL editor.`
+      );
+    } else {
+      console.log('User theme preference column verified in database.');
+    }
   } catch (error) {
     console.error('Database initialization failed:', error);
     throw error;

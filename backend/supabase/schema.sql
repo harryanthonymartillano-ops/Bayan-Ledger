@@ -12,6 +12,7 @@ create table if not exists public.users (
   chain_role_granted boolean not null default false,
   chain_role_granted_at timestamptz,
   status text not null default 'Active',
+  theme_preference text not null default 'light',
   last_login timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -20,8 +21,11 @@ create table if not exists public.users (
 alter table public.users add column if not exists first_name text;
 alter table public.users add column if not exists middle_name text;
 alter table public.users add column if not exists last_name text;
+alter table public.users add column if not exists theme_preference text not null default 'light';
 alter table public.users drop column if exists department;
 alter table public.users drop constraint if exists users_wallet_address_key;
+alter table public.users drop constraint if exists check_users_theme_preference;
+alter table public.users add constraint check_users_theme_preference check (theme_preference in ('light', 'dark'));
 
 
 create table if not exists public.projects (

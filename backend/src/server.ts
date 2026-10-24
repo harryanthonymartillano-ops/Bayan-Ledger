@@ -8,6 +8,7 @@ import fs from 'fs';
 import { initializeDatabase } from './db/config';
 import { logger } from './logger';
 import authRoutes from './routes/auth';
+// Routes registered with database-persisted theme preference
 import projectRoutes from './routes/projects';
 import milestoneRoutes from './routes/milestones';
 import transactionRoutes from './routes/transactions';

@@ -5,6 +5,7 @@ import { useBlockchain } from '../context/BlockchainContext';
 import { useNotifications } from '../context/NotificationContext';
 import { Shield, LayoutDashboard, LogOut, Users, List, Map, FileText, CreditCard, Activity, AlertTriangle, Archive, Bell, Scroll, CheckCircle2, BarChart3 } from 'lucide-react';
 import { WalletOptionMenu } from './WalletOptionMenu';
+import { ThemeToggle } from './ThemeToggle';
 
 type HeaderNotification = {
   id: string;
@@ -681,6 +682,9 @@ export const OfficialLayout = () => {
                 </span>
               </div>
             )}
+
+            {/* Quick Dark/Light Mode Toggle */}
+            <ThemeToggle variant="icon" />
 
             {/* Option Button Icon & Dropdown Menu */}
             <WalletOptionMenu />

@@ -204,6 +204,7 @@ export interface User {
   chain_role_granted: boolean;
   chain_role_granted_at?: string;
   status: 'Active' | 'Inactive';
+  theme_preference?: 'light' | 'dark';
   last_login?: string;
   created_at: string;
   updated_at: string;

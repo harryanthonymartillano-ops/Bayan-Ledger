@@ -76,6 +76,9 @@ router.post('/login', async (req: Request, res: Response): Promise<void> => {
         email: user.email,
         role: user.role,
         walletAddress: user.wallet_address,
+        firstName: user.first_name,
+        lastName: user.last_name,
+        themePreference: user.theme_preference || 'light',
         status: user.status,
       },
     });
@@ -188,7 +191,7 @@ router.get('/profile', authenticateTokenAllowInactive, async (req: AuthRequest, 
 
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, email, role, wallet_address, status, last_login, created_at')
+      .select('id, email, role, wallet_address, status, last_login, created_at, theme_preference')
       .eq('id', req.user.id)
       .single();
 
@@ -197,10 +200,57 @@ router.get('/profile', authenticateTokenAllowInactive, async (req: AuthRequest, 
       return;
     }
 
-    res.json({ user });
+    res.json({
+      user: {
+        ...user,
+        themePreference: user.theme_preference || 'light',
+      },
+    });
   } catch (error) {
     logger.error('Profile fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+// Update current user's theme preference ('light' | 'dark')
+router.patch('/theme', authenticateTokenAllowInactive, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Authentication required' });
+      return;
+    }
+
+    const { theme } = req.body;
+    if (theme !== 'light' && theme !== 'dark') {
+      res.status(400).json({ error: "Theme preference must be 'light' or 'dark'" });
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('users')
+      .update({ theme_preference: theme, updated_at: new Date().toISOString() })
+      .eq('id', req.user.id)
+      .select('id, email, theme_preference')
+      .single();
+
+    if (error) {
+      logger.warn(`Could not save theme_preference to Supabase users table for ${req.user.id}: ${error.message}`);
+      res.status(200).json({
+        success: false,
+        theme,
+        warning: 'Theme saved locally. Run backend/supabase/migrations/20261025_add_theme_preference.sql in Supabase SQL editor to persist permanently in database.',
+      });
+      return;
+    }
+
+    logger.info(`User ${req.user.email} updated theme preference to: ${theme}`);
+    res.json({
+      success: true,
+      theme: data?.theme_preference || theme,
+    });
+  } catch (error) {
+    logger.error('Theme preference update error:', error);
+    res.status(500).json({ error: 'Failed to update theme preference' });
   }
 });
 
@@ -249,12 +299,13 @@ router.get('/me', authenticateTokenAllowInactive, async (req: AuthRequest, res: 
         walletAddress: req.user.walletAddress,
         firstName: '',
         lastName: '',
+        themePreference: 'light',
         status: req.user.status || 'Active',
       });
       return;
     }
 
-res.json({
+    res.json({
       id: user.id,
       email: user.email,
       role: user.role,
@@ -265,6 +316,7 @@ res.json({
       chainRoleGranted: user.chain_role_granted,
       chainRoleGrantedAt: user.chain_role_granted_at,
       status: user.status,
+      themePreference: user.theme_preference || 'light',
     });
   } catch (error) {
     logger.error('Me fetch error:', error);

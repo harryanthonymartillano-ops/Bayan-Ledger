@@ -14,6 +14,7 @@ export interface User {
   chainRoleGranted?: boolean;
   status?: 'Active' | 'Inactive';
   name?: string; // legacy
+  themePreference?: 'light' | 'dark';
 }
 
 export interface RegisteredUser extends User {
@@ -30,6 +31,7 @@ interface AuthContextType {
   logout: () => void;
   refreshCurrentUser: () => Promise<void>;
   refreshUsers: () => Promise<void>;
+  updateLocalThemePreference: (theme: 'light' | 'dark') => void;
   addRegisteredUser: (user: {
     email: string;
     password: string;
@@ -92,6 +94,7 @@ const mapBackendUser = (user: any): RegisteredUser => ({
   walletAddress: user.wallet_address || user.walletAddress || '',
   chainRoleGranted: Boolean(user.chain_role_granted || user.chainRoleGranted),
   chainRoleGrantedAt: user.chain_role_granted_at,
+  themePreference: (user.theme_preference === 'dark' || user.themePreference === 'dark') ? 'dark' : 'light',
 });
 
 const mapCurrentUser = (user: any): User => ({
@@ -105,6 +108,7 @@ const mapCurrentUser = (user: any): User => ({
   walletAddress: user.walletAddress || user.wallet_address,
   chainRoleGranted: Boolean(user.chainRoleGranted || user.chain_role_granted),
   status: user.status as 'Active' | 'Inactive',
+  themePreference: (user.themePreference === 'dark' || user.theme_preference === 'dark') ? 'dark' : 'light',
 });
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -169,8 +173,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       try {
-        const profile = await apiClient.getProfile(savedToken);
-        const restoredUser = mapCurrentUser(profile);
+        const profile = await apiClient.getProfile(savedToken) as any;
+        const restoredUser = mapCurrentUser(profile?.user || profile);
         setToken(savedToken);
         setUser(restoredUser);
         localStorage.setItem(AUTH_USER_KEY, JSON.stringify(restoredUser));
@@ -204,8 +208,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.setItem(AUTH_TOKEN_KEY, nextToken);
     setToken(nextToken);
 
-    const profile = await apiClient.getProfile(nextToken);
-    const nextUser = mapCurrentUser(profile);
+    const profile = await apiClient.getProfile(nextToken) as any;
+    const rawProfile = profile?.user || profile || {};
+    const nextUser = mapCurrentUser({ ...(response.user || {}), ...rawProfile });
     localStorage.setItem(AUTH_USER_KEY, JSON.stringify(nextUser));
     setUser(nextUser);
     await fetchUsers(nextToken, nextUser);
@@ -215,8 +220,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!token) return;
 
     try {
-      const profile = await apiClient.getProfile(token);
-      const refreshedUser = mapCurrentUser(profile);
+      const profile = await apiClient.getProfile(token) as any;
+      const refreshedUser = mapCurrentUser(profile?.user || profile);
       setUser(refreshedUser);
       localStorage.setItem(AUTH_USER_KEY, JSON.stringify(refreshedUser));
       await fetchUsers(token, refreshedUser);
@@ -262,8 +267,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return mapBackendUser(response.user);
   };
 
+  const updateLocalThemePreference = (theme: 'light' | 'dark') => {
+    setUser((prev) => {
+      if (!prev) return null;
+      const updated = { ...prev, themePreference: theme };
+      try {
+        localStorage.setItem(AUTH_USER_KEY, JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+      return updated;
+    });
+  };
+
   return (
-    <AuthContext.Provider value={{ user, registeredUsers, token, isAuthLoading, login, logout, refreshCurrentUser, refreshUsers, addRegisteredUser }}>
+    <AuthContext.Provider value={{ user, registeredUsers, token, isAuthLoading, login, logout, refreshCurrentUser, refreshUsers, addRegisteredUser, updateLocalThemePreference }}>
       {children}
     </AuthContext.Provider>
   );
