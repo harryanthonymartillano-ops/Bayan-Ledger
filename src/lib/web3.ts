@@ -52,25 +52,140 @@ export const getWeb3Provider = () => {
   return null;
 };
 
-export const getReadOnlyWeb3Provider = () => {
-  const rpcUrl =
-    (import.meta as any).env?.VITE_SEPOLIA_RPC_URL ||
-    "https://sepolia.infura.io/v3/94868e8cc29b45c39a4fb474e5fae485";
+// --- Reliable Sepolia RPC endpoints (multiple fallbacks) ---
+// Ordered by reliability: publicnode and drpc are the most stable free providers
+const SEPOLIA_PUBLIC_RPCS = [
+  "https://ethereum-sepolia-rpc.publicnode.com",
+  "https://sepolia.drpc.org",
+  "https://rpc2.sepolia.org",
+  "https://sepolia.gateway.tenderly.co",
+  "https://1rpc.io/sepolia",
+];
 
-  if (rpcUrl) {
+// These are the same RPCs MetaMask should use when adding the Sepolia network
+export const SEPOLIA_METAMASK_RPCS = [
+  "https://ethereum-sepolia-rpc.publicnode.com",
+  "https://sepolia.drpc.org",
+  "https://rpc2.sepolia.org",
+];
+
+// Track which RPC index is currently active (rotates on failure)
+let currentRpcIndex = 0;
+let lastProviderCreatedAt = 0;
+
+/**
+ * Creates a read-only provider with automatic fallback across multiple RPCs.
+ * If the current RPC fails, the next call will rotate to the next one.
+ */
+export const getReadOnlyWeb3Provider = (): ethers.providers.JsonRpcProvider => {
+  const customRpc = (import.meta as any).env?.VITE_SEPOLIA_RPC_URL;
+  const validCustom =
+    customRpc && !customRpc.includes('94868e8cc29b45c39a4fb474e5fae485')
+      ? customRpc
+      : null;
+
+  // If a custom RPC is set (e.g., Alchemy/Infura with valid key), prefer it
+  if (validCustom) {
+    return new ethers.providers.JsonRpcProvider({
+      url: validCustom,
+      timeout: 15000,
+    });
+  }
+
+  const rpcUrl = SEPOLIA_PUBLIC_RPCS[currentRpcIndex % SEPOLIA_PUBLIC_RPCS.length];
+  lastProviderCreatedAt = Date.now();
+  return new ethers.providers.JsonRpcProvider({
+    url: rpcUrl,
+    timeout: 15000,
+  });
+};
+
+/**
+ * Rotate to the next RPC endpoint after a failure.
+ */
+export const rotateRpcEndpoint = (): void => {
+  const previousIndex = currentRpcIndex;
+  currentRpcIndex = (currentRpcIndex + 1) % SEPOLIA_PUBLIC_RPCS.length;
+  console.warn(
+    `[web3] RPC rotated: ${SEPOLIA_PUBLIC_RPCS[previousIndex]} → ${SEPOLIA_PUBLIC_RPCS[currentRpcIndex]}`
+  );
+};
+
+/**
+ * Execute a read-only call with automatic RPC fallback.
+ * Tries each RPC endpoint in sequence until one succeeds.
+ */
+export const withRpcFallback = async <T>(
+  fn: (provider: ethers.providers.JsonRpcProvider) => Promise<T>
+): Promise<T> => {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < SEPOLIA_PUBLIC_RPCS.length; attempt++) {
+    const provider = getReadOnlyWeb3Provider();
     try {
-      return new ethers.providers.JsonRpcProvider(rpcUrl);
-    } catch {
-      // Continue to fallback
+      const result = await fn(provider);
+      return result;
+    } catch (error: any) {
+      lastError = error;
+      const msg = (error?.message || '').toLowerCase();
+
+      // Don't rotate for contract-level reverts — those aren't RPC issues
+      if (msg.includes('execution reverted') || msg.includes('call revert')) {
+        throw error;
+      }
+
+      console.warn(
+        `[web3] RPC call failed on ${SEPOLIA_PUBLIC_RPCS[currentRpcIndex % SEPOLIA_PUBLIC_RPCS.length]}: ${error?.message || error}`
+      );
+      rotateRpcEndpoint();
     }
   }
 
-  const browserProvider = getWeb3Provider();
-  if (browserProvider) {
-    return browserProvider;
+  throw lastError;
+};
+
+/**
+ * Wait for a transaction with retry logic.
+ * If tx.wait() fails due to a network hiccup, retries up to `maxRetries` times
+ * with exponential backoff.
+ */
+export const waitForTransaction = async (
+  tx: ethers.providers.TransactionResponse,
+  confirmations = 1,
+  maxRetries = 3
+): Promise<ethers.providers.TransactionReceipt> => {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const receipt = await tx.wait(confirmations);
+      return receipt;
+    } catch (error: any) {
+      const msg = (error?.message || '').toLowerCase();
+
+      // Don't retry if the transaction itself was reverted on chain
+      if (
+        msg.includes('transaction failed') ||
+        msg.includes('execution reverted') ||
+        msg.includes('transaction was replaced') ||
+        error?.code === 'TRANSACTION_REPLACED'
+      ) {
+        throw error;
+      }
+
+      // Network/timeout errors — worth retrying
+      if (attempt < maxRetries) {
+        const backoffMs = Math.min(2000 * Math.pow(2, attempt), 10000);
+        console.warn(
+          `[web3] tx.wait() attempt ${attempt + 1}/${maxRetries + 1} failed (${msg}), retrying in ${backoffMs}ms...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      } else {
+        throw error;
+      }
+    }
   }
 
-  return new ethers.providers.JsonRpcProvider("https://rpc.sepolia.org");
+  // TypeScript: should never reach here, but just in case
+  throw new Error('Transaction confirmation failed after all retry attempts.');
 };
 
 export const getContract = async (signerOrProvider: ethers.Signer | ethers.providers.Provider) => {

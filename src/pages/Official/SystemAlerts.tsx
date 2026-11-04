@@ -11,7 +11,7 @@ import apiClient from '../../lib/apiClient';
 import { readBreachResolutionOverrides } from '../../lib/breachDetection';
 import { isProjectTampered } from '../../lib/projectIntegrity';
 import { isMilestoneDelayed, isProjectDelayed } from '../../lib/scheduleStatus';
-import { getContract, getReadOnlyWeb3Provider } from '../../lib/web3';
+import { getContract, getReadOnlyWeb3Provider, withRpcFallback } from '../../lib/web3';
 import { readStoredChainBudgets, updateStoredChainBudget } from '../../lib/chainBudgetCache';
 
 const getRelativeAlertDate = (minutesAgo: number) =>
@@ -77,12 +77,12 @@ export const SystemAlerts = () => {
     let isMounted = true;
 
     const loadTamperedProject = async () => {
-      const provider = getReadOnlyWeb3Provider();
-      if (!provider || projects.length === 0) return;
+      if (projects.length === 0) return;
 
       try {
-        const contract = await getContract(provider);
-        const snapshots = await Promise.all(
+        await withRpcFallback(async (provider) => {
+          const contract = await getContract(provider);
+          const snapshots = await Promise.all(
           projects.map(async (project) => {
             try {
               const chainProject = await contract.projects(project.id);
@@ -111,6 +111,7 @@ export const SystemAlerts = () => {
             }
           }
           return changed ? next : prev;
+          });
         });
       } catch (error) {
         console.warn('Unable to evaluate blockchain/database desynchronization alerts.', error);

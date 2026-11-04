@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { useBlockchain } from '../../context/BlockchainContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
@@ -13,7 +13,7 @@ export const VerifiedPayments = () => {
   const pendingPayments = projects.flatMap(p =>
     p.saro
       ? p.milestones
-        .filter(m => m.status === 'Verified' && !!m.verifiedBy)
+        .filter(m => m.status === 'Verified' && !!m.verifiedBy && !m.onChainPaid && p.transactions.some(tx => tx.type === 'Disbursement (NCA)' && tx.milestoneId === m.id && tx.status === '1/2 Signed'))
         .map(m => ({ ...m, projectId: p.id, projectName: p.name, allocated: p.allocatedFunds, disbursed: p.disbursedFunds, saro: p.saro }))
       : []
   );

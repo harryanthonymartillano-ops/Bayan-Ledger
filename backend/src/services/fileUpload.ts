@@ -45,6 +45,7 @@ export async function uploadFileBuffer(
   originalName: string,
   mimeType: string,
   folder = 'documents'
+
 ): Promise<StoredFileResult> {
   if (cloudinaryConfigured) {
     const publicId = `${folder}/${Date.now()}-${sanitizeFileName(originalName)}`;

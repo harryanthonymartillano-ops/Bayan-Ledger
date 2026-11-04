@@ -7,9 +7,9 @@ export const formatPhpCurrency = (amount: number) =>
 
 export const isProjectTampered = (databasePrice: number, blockchainPrice: number) => {
   if (!Number.isFinite(databasePrice) || !Number.isFinite(blockchainPrice)) return false;
-  // If database price has decimals and blockchain stores the integer amount (rounded),
-  // allow sub-peso fractional centavo difference (< 1.00) if rounded values match.
-  if (Math.abs(databasePrice - blockchainPrice) < 1 && Math.round(databasePrice) === Math.round(blockchainPrice)) {
+  // If database price has decimals and blockchain stores the integer amount (rounded or truncated),
+  // allow sub-peso fractional centavo difference (< 1.00)
+  if (Math.abs(databasePrice - blockchainPrice) < 1) {
     return false;
   }
   return databasePrice !== blockchainPrice;

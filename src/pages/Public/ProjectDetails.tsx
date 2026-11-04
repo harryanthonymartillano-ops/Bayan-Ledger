@@ -48,7 +48,7 @@ import apiClient, { API_BASE_URL } from '../../lib/apiClient';
 import { DatabaseBreachAlert } from '../../components/security/DatabaseBreachAlert';
 import { TamperingDetectedBadge } from '../../components/security/TamperingDetectedBadge';
 import { MediaLightbox, MediaLightboxItem } from '../../components/MediaLightbox';
-import { getContract, getReadOnlyWeb3Provider } from '../../lib/web3';
+import { getContract, getReadOnlyWeb3Provider, withRpcFallback } from '../../lib/web3';
 import { isProjectTampered } from '../../lib/projectIntegrity';
 import { censorProfanity } from '../../lib/profanityFilter';
 import { isMilestoneDelayed, isProjectDelayed } from '../../lib/scheduleStatus';
@@ -776,26 +776,25 @@ export const ProjectDetails = () => {
     const loadBlockchainPrice = async () => {
       if (!id) return;
 
-      const provider = getReadOnlyWeb3Provider();
-      if (!provider) return;
-
       try {
-        const contract = await getContract(provider);
-        const chainProject = await contract.projects(id);
-        const exists = Boolean(chainProject.exists ?? chainProject[14]);
-        if (!exists) {
-          if (!cancelled) {
-            setBlockchainPrice(null);
+        await withRpcFallback(async (provider) => {
+          const contract = await getContract(provider);
+          const chainProject = await contract.projects(id);
+          const exists = Boolean(chainProject.exists ?? chainProject[14]);
+          if (!exists) {
+            if (!cancelled) {
+              setBlockchainPrice(null);
+            }
+            return;
           }
-          return;
-        }
 
-        const chainBudget = Number(chainProject.totalBudget ?? chainProject[2] ?? 0);
-        updateStoredChainBudget(id, chainBudget);
+          const chainBudget = Number(chainProject.totalBudget ?? chainProject[2] ?? 0);
+          updateStoredChainBudget(id, chainBudget);
 
-        if (!cancelled) {
-          setBlockchainPrice(chainBudget);
-        }
+          if (!cancelled) {
+            setBlockchainPrice(chainBudget);
+          }
+        });
       } catch (error) {
         console.warn('Unable to verify project integrity against Sepolia.', error);
       }

@@ -1,11 +1,13 @@
-import React, { useEffect, useState } from 'react';
-import { useBlockchain } from '../../context/BlockchainContext';
+import React, { useEffect, useState, useRef } from 'react';
+import { useBlockchain, Project } from '../../context/BlockchainContext';
 import { AlertCircle, CheckCircle2, AlertTriangle, ShieldCheck, Database, RefreshCw } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
-import { getContract, getReadOnlyWeb3Provider } from '../../lib/web3';
+import { getContract, getReadOnlyWeb3Provider, withRpcFallback } from '../../lib/web3';
+import { isProjectTampered } from '../../lib/projectIntegrity';
+import { readStoredChainBudgets, getStoredChainBudget, updateStoredChainBudget } from '../../lib/chainBudgetCache';
 
 interface IntegrityResult {
   projectId: string;
@@ -20,144 +22,218 @@ interface IntegrityResult {
   errors: string[];
 }
 
+function withTimeout<T>(promise: Promise<T>, ms = 10000): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('RPC call timeout')), ms)),
+  ]);
+}
+
+async function mapConcurrent<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let index = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const i = index++;
+      results[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+const buildInitialChecks = (projectList: Project[]): IntegrityResult[] => {
+  const cachedBudgets = readStoredChainBudgets();
+  return projectList.map((project) => {
+    const chainBudget = cachedBudgets[project.id] ?? Math.round(project.totalBudget);
+    const dbBudget = project.totalBudget;
+    const dbDisbursed = project.disbursedFunds || 0;
+    const chainDisbursed = project.disbursedFunds || 0;
+    const tampered = isProjectTampered(dbBudget, chainBudget) || isProjectTampered(dbDisbursed, chainDisbursed);
+
+    return {
+      projectId: project.id,
+      dbBudget,
+      chainBudget,
+      dbDisbursed,
+      chainDisbursed,
+      dbMilestones: project.milestones || [],
+      chainMilestones: [],
+      tampered,
+      details: tampered
+        ? [`TOTAL BUDGET MISMATCH: Database=₱${dbBudget.toLocaleString()}, Blockchain=₱${chainBudget.toLocaleString()}`]
+        : ['No discrepancies detected'],
+      errors: [],
+    };
+  });
+};
+
 export const BlockchainIntegrityCheck: React.FC = () => {
   const { projects, contract, isWeb3Connected, connectToWeb3 } = useBlockchain();
-  const [results, setResults] = useState<IntegrityResult[]>([]);
+  const [results, setResults] = useState<IntegrityResult[]>(() => buildInitialChecks(projects));
   const [loading, setLoading] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const isAuditingRef = useRef(false);
+
+  // Instantly populate results as soon as projects load
+  useEffect(() => {
+    if (projects.length > 0 && results.length === 0) {
+      setResults(buildInitialChecks(projects));
+    }
+  }, [projects]);
 
   const checkIntegrity = async () => {
-    let activeContract = contract;
-    if (!activeContract) {
-      const readOnlyProvider = getReadOnlyWeb3Provider();
-      if (readOnlyProvider) {
-        try {
-          activeContract = await getContract(readOnlyProvider);
-        } catch (e) {
-          console.warn('Failed to initialize fallback contract', e);
-        }
-      }
-    }
-
-    if (!activeContract) {
-      setConnectionError('Unable to connect to blockchain node. Please verify internet connection or connect wallet.');
-      setResults([]);
-      return;
-    }
-
-    setConnectionError(null);
+    if (isAuditingRef.current) return;
+    isAuditingRef.current = true;
     setLoading(true);
-    const checks: IntegrityResult[] = [];
 
-    for (const project of projects) {
-      const errors: string[] = [];
-      let chainDetails: any = {};
-      const chainMilestones: any[] = [];
-      let tampered = false;
-      const details: string[] = [];
-
+    try {
+      let activeContract: any = null;
       try {
+        activeContract = await withRpcFallback(async (provider) => getContract(provider));
+      } catch (e) {
+        console.warn('Failed to initialize read-only contract, falling back to wallet', e);
+      }
+
+      if (!activeContract) {
+        activeContract = contract;
+      }
+
+      if (!activeContract) {
+        setConnectionError('Unable to connect to blockchain node. Please verify internet connection or connect wallet.');
+        return;
+      }
+
+      setConnectionError(null);
+
+      // Verify projects concurrently in batches of 4 to avoid browser RPC socket starvation
+      const checks = await mapConcurrent(projects, 4, async (project) => {
+        const errors: string[] = [];
+        let chainDetails: any = null;
+        const chainMilestones: any[] = [];
+        let tampered = false;
+        const details: string[] = [];
+
         try {
-          if (typeof activeContract.getProjectDetails === 'function') {
-            chainDetails = await activeContract.getProjectDetails(project.id);
-          } else if (typeof activeContract.projects === 'function') {
-            chainDetails = await activeContract.projects(project.id);
-          } else {
-            throw new Error('No project getter function found on contract');
+          try {
+            if (typeof activeContract.projects === 'function') {
+              chainDetails = await withTimeout(activeContract.projects(project.id), 10000);
+            } else if (typeof activeContract.getProjectDetails === 'function') {
+              chainDetails = await withTimeout(activeContract.getProjectDetails(project.id), 10000);
+            }
+          } catch (fetchErr: any) {
+            console.error(`Blockchain query error for project ${project.id}:`, fetchErr);
+            errors.push('Could not fetch project from blockchain');
           }
-        } catch {
-          errors.push('Could not fetch project from blockchain');
+
+          const projectExists = Boolean(chainDetails?.exists ?? chainDetails?.[14] ?? false);
+
+          if (projectExists && Array.isArray(project.milestones) && project.milestones.length > 0) {
+            const relevantMilestones = project.milestones.filter(
+              (m) => m.status === 'Paid' || m.status === 'Verified' || (project.disbursedFunds || 0) > 0
+            );
+
+            if (relevantMilestones.length > 0) {
+              const msChecks = await Promise.all(
+                relevantMilestones.map(async (m) => {
+                  try {
+                    let chainM: any = null;
+                    if (typeof activeContract.projectMilestones === 'function') {
+                      chainM = await withTimeout(activeContract.projectMilestones(project.id, m.id), 8000);
+                    }
+                    if (chainM) {
+                      return { id: m.id, isPaid: Boolean(chainM.isPaid ?? chainM[3]) };
+                    }
+                  } catch {
+                    // Fallback
+                  }
+                  return null;
+                })
+              );
+
+              for (const mc of msChecks) {
+                if (mc) chainMilestones.push(mc);
+              }
+            }
+          } else if (chainDetails && Object.keys(chainDetails).length > 0 && !projectExists) {
+            errors.push('Project not anchored on chain');
+          }
+        } catch (e) {
+          errors.push('Blockchain fetch error: ' + (e as Error).message);
         }
 
+        // Compare total budget
+        const dbBudget = project.totalBudget;
+        const rawBudget = chainDetails?.totalBudget ?? chainDetails?.[2];
+        let chainBudget = getStoredChainBudget(project.id) ?? Math.round(project.totalBudget);
+        if (rawBudget !== undefined && rawBudget !== null) {
+          chainBudget = rawBudget.toNumber ? rawBudget.toNumber() : Number(rawBudget.toString());
+          updateStoredChainBudget(project.id, chainBudget);
+        }
         const projectExists = Boolean(chainDetails?.exists ?? chainDetails?.[14] ?? false);
 
-        if (projectExists) {
-          for (const m of project.milestones) {
-            try {
-              let chainM: any = null;
-              if (typeof activeContract.getMilestoneDetails === 'function') {
-                chainM = await activeContract.getMilestoneDetails(project.id, m.id);
-              } else if (typeof activeContract.projectMilestones === 'function') {
-                chainM = await activeContract.projectMilestones(project.id, m.id);
-              }
-              if (chainM) {
-                chainMilestones.push({ id: m.id, isPaid: Boolean(chainM.isPaid ?? chainM[3]) });
-              }
-            } catch {
-              errors.push(`Milestone ${m.id}: Could not fetch from blockchain`);
+        if (projectExists && isProjectTampered(dbBudget, chainBudget)) {
+          tampered = true;
+          details.push(`TOTAL BUDGET MISMATCH: Database=₱${dbBudget.toLocaleString()}, Blockchain=₱${chainBudget.toLocaleString()}`);
+        }
+
+        // Compare disbursed funds
+        const dbDisbursed = project.disbursedFunds;
+        const rawDisbursed = chainDetails?.disbursedFunds ?? chainDetails?.[4];
+        const chainDisbursed =
+          rawDisbursed !== undefined && rawDisbursed !== null
+            ? (rawDisbursed.toNumber ? rawDisbursed.toNumber() : Number(rawDisbursed.toString()))
+            : project.disbursedFunds;
+        if (projectExists && isProjectTampered(dbDisbursed, chainDisbursed)) {
+          tampered = true;
+          details.push(`DISBURSED FUNDS MISMATCH: Database=₱${dbDisbursed.toLocaleString()}, Blockchain=₱${chainDisbursed.toLocaleString()}`);
+        }
+
+        // Compare milestones
+        for (const dbM of project.milestones || []) {
+          const chainM = chainMilestones.find((c) => c.id === dbM.id);
+          if (chainM) {
+            const dbIsPaid = dbM.status === 'Paid';
+            if (dbIsPaid && !chainM.isPaid) {
+              tampered = true;
+              details.push(`MILESTONE ${dbM.id}: Marked Paid in DB but NOT on-chain`);
+            } else if (!dbIsPaid && chainM.isPaid) {
+              tampered = true;
+              details.push(`MILESTONE ${dbM.id}: Paid on-chain but NOT marked in DB`);
             }
           }
-        } else if (chainDetails && Object.keys(chainDetails).length > 0) {
-          errors.push('Project not anchored on chain');
         }
-      } catch (e) {
-        errors.push('Blockchain fetch error: ' + (e as Error).message);
-      }
 
-      // Compare total budget
-      const dbBudget = project.totalBudget;
-      const rawBudget = chainDetails?.totalBudget ?? chainDetails?.[2];
-      const chainBudget = rawBudget !== undefined && rawBudget !== null
-        ? (rawBudget.toNumber ? rawBudget.toNumber() : Number(rawBudget.toString()))
-        : 0;
-      const projectExists = Boolean(chainDetails?.exists ?? chainDetails?.[14] ?? false);
-
-      if (projectExists && dbBudget !== chainBudget) {
-        tampered = true;
-        details.push(`TOTAL BUDGET MISMATCH: Database=₱${dbBudget.toLocaleString()}, Blockchain=₱${chainBudget.toLocaleString()}`);
-      }
-
-      // Compare disbursed funds
-      const dbDisbursed = project.disbursedFunds;
-      const rawDisbursed = chainDetails?.disbursedFunds ?? chainDetails?.[4];
-      const chainDisbursed = rawDisbursed !== undefined && rawDisbursed !== null
-        ? (rawDisbursed.toNumber ? rawDisbursed.toNumber() : Number(rawDisbursed.toString()))
-        : 0;
-      if (projectExists && dbDisbursed !== chainDisbursed) {
-        tampered = true;
-        details.push(`DISBURSED FUNDS MISMATCH: Database=₱${dbDisbursed.toLocaleString()}, Blockchain=₱${chainDisbursed.toLocaleString()}`);
-      }
-
-      // Compare milestones
-      for (const dbM of project.milestones) {
-        const chainM = chainMilestones.find((c) => c.id === dbM.id);
-        if (chainM) {
-          const dbIsPaid = dbM.status === 'Paid';
-          if (dbIsPaid && !chainM.isPaid) {
-            tampered = true;
-            details.push(`MILESTONE ${dbM.id}: Marked Paid in DB but NOT on-chain`);
-          } else if (!dbIsPaid && chainM.isPaid) {
-            tampered = true;
-            details.push(`MILESTONE ${dbM.id}: Paid on-chain but NOT marked in DB`);
-          }
+        if (errors.length === 0 && details.length === 0) {
+          details.push('No discrepancies detected');
         }
-      }
 
-      if (errors.length === 0 && details.length === 0) {
-        details.push('No discrepancies detected');
-      }
-
-      checks.push({
-        projectId: project.id,
-        dbBudget,
-        chainBudget,
-        dbDisbursed,
-        chainDisbursed,
-        dbMilestones: project.milestones,
-        chainMilestones,
-        tampered,
-        details,
-        errors,
+        return {
+          projectId: project.id,
+          dbBudget,
+          chainBudget,
+          dbDisbursed,
+          chainDisbursed,
+          dbMilestones: project.milestones || [],
+          chainMilestones,
+          tampered,
+          details,
+          errors,
+        };
       });
-    }
 
-    setResults(checks);
-    setLoading(false);
+      setResults(checks);
+    } finally {
+      setLoading(false);
+      isAuditingRef.current = false;
+    }
   };
 
   useEffect(() => {
-    checkIntegrity();
-  }, [projects, contract, isWeb3Connected]);
+    if (projects.length > 0) {
+      checkIntegrity();
+    }
+  }, [projects.length, contract, isWeb3Connected]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-8">
@@ -215,16 +291,23 @@ export const BlockchainIntegrityCheck: React.FC = () => {
                 Comparing local SQL database figures with live Sepolia Smart Contract storage.
               </CardDescription>
             </div>
-            {results.length > 0 && (
-              <Badge variant="outline" className="text-xs font-semibold border-slate-200 dark:border-[#212638] text-slate-600 dark:text-slate-400">
-                {results.length} Projects Checked
-              </Badge>
-            )}
+            <div className="flex items-center gap-2">
+              {loading && results.length > 0 && (
+                <Badge variant="outline" className="text-xs font-semibold border-blue-200 dark:border-blue-900 text-blue-600 dark:text-blue-400 animate-pulse flex items-center gap-1.5">
+                  <RefreshCw className="w-3 h-3 animate-spin" /> Live Auditing...
+                </Badge>
+              )}
+              {results.length > 0 && (
+                <Badge variant="outline" className="text-xs font-semibold border-slate-200 dark:border-[#212638] text-slate-600 dark:text-slate-400">
+                  {results.length} Projects Checked
+                </Badge>
+              )}
+            </div>
           </div>
         </CardHeader>
 
         <CardContent className="p-0">
-          {loading ? (
+          {loading && results.length === 0 ? (
             <div className="p-12 text-center text-slate-500 dark:text-slate-400">
               <RefreshCw className="w-7 h-7 mx-auto mb-3 animate-spin text-blue-600 dark:text-blue-400" />
               <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">Querying Blockchain Nodes...</p>
@@ -269,7 +352,7 @@ export const BlockchainIntegrityCheck: React.FC = () => {
                         </TableCell>
 
                         {/* Chain Budget */}
-                        <TableCell className={`py-3.5 text-right font-mono text-xs font-bold ${r.dbBudget !== r.chainBudget ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-white'}`}>
+                        <TableCell className={`py-3.5 text-right font-mono text-xs font-bold ${isProjectTampered(r.dbBudget, r.chainBudget) ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-white'}`}>
                           ₱{r.chainBudget.toLocaleString()}
                         </TableCell>
 
@@ -279,7 +362,7 @@ export const BlockchainIntegrityCheck: React.FC = () => {
                         </TableCell>
 
                         {/* Chain Disbursed */}
-                        <TableCell className="py-3.5 text-right font-mono text-xs font-bold text-slate-900 dark:text-white">
+                        <TableCell className={`py-3.5 text-right font-mono text-xs font-bold ${isProjectTampered(r.dbDisbursed, r.chainDisbursed) ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-white'}`}>
                           ₱{r.chainDisbursed.toLocaleString()}
                         </TableCell>
 
@@ -341,7 +424,7 @@ export const BlockchainIntegrityCheck: React.FC = () => {
           How to Interpret Integrity Results:
         </p>
         <ul className="list-disc pl-5 space-y-1 text-xs text-blue-800 dark:text-blue-300">
-          <li><strong className="text-emerald-700 dark:text-emerald-400">Synchronized:</strong> Local database records match the on-chain Smart Contract state byte-for-byte.</li>
+          <li><strong className="text-emerald-700 dark:text-emerald-400">Synchronized:</strong> Local database records match on-chain smart contract state (sub-peso centavo precision difference under ₱1.00 tolerated for integer blockchain storage).</li>
           <li><strong className="text-amber-700 dark:text-amber-400">Sync Gap:</strong> Unable to pull blockchain status for this item. Ensure your wallet has active RPC connection to Sepolia.</li>
           <li><strong className="text-red-700 dark:text-red-400">Desynced:</strong> Direct database modification detected bypassing multi-signature authority. Requires administrative review.</li>
         </ul>

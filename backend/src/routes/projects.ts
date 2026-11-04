@@ -1450,7 +1450,7 @@ router.post('/', authenticateToken, requireRole(['official', 'admin']), async (r
       due_date: milestone.due_date,
       deliverables: milestone.deliverables,
       percentage: Math.round(Number(milestone.percentage || 0)),
-      budget: Math.round(Number((parsedTotalBudget * (milestone.percentage || 0)) / 100)),
+      budget: Number(((parsedTotalBudget * (milestone.percentage || 0)) / 100).toFixed(2)),
       status: 'Pending',
       created_by: req.user!.id,
     }));

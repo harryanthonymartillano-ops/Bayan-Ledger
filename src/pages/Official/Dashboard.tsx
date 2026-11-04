@@ -16,7 +16,7 @@ import { MediaLightbox, MediaLightboxItem } from '../../components/MediaLightbox
 import apiClient, { API_BASE_URL } from '../../lib/apiClient';
 import { clearResolvedProjectBudgetOverride, readBreachResolutionOverrides, setResolvedProjectBudgetOverride } from '../../lib/breachDetection';
 import { isProjectTampered } from '../../lib/projectIntegrity';
-import { getContract, getReadOnlyWeb3Provider } from '../../lib/web3';
+import { getContract, getReadOnlyWeb3Provider, withRpcFallback } from '../../lib/web3';
 import { isMilestoneDelayed, isProjectDelayed } from '../../lib/scheduleStatus';
 import { OfficialAnalyticsDashboard } from '../../components/OfficialAnalyticsDashboard';
 import { readStoredChainBudgets, updateStoredChainBudget } from '../../lib/chainBudgetCache';
@@ -335,37 +335,34 @@ export const Dashboard = () => {
         return;
       }
 
-      const provider = getReadOnlyWeb3Provider();
-      if (!provider) {
-        return;
-      }
-
       try {
-        const contract = await getContract(provider);
-        const snapshots = await Promise.all(projects.map(async (project) => {
-          try {
-            const chainProject = await contract.projects(project.id);
-            const exists = Boolean(chainProject.exists ?? chainProject[14]);
-            if (!exists) return [project.id, null] as const;
-            return [project.id, Number(chainProject.totalBudget ?? chainProject[2] ?? 0)] as const;
-          } catch {
-            return [project.id, null] as const;
-          }
-        }));
-
-        if (!isMounted) return;
-
-        setChainBudgets((prev) => {
-          const next = { ...prev };
-
-          for (const [projectId, budget] of snapshots) {
-            if (typeof budget === 'number' && Number.isFinite(budget)) {
-              next[projectId] = budget;
-              updateStoredChainBudget(projectId, budget);
+        await withRpcFallback(async (provider) => {
+          const contract = await getContract(provider);
+          const snapshots = await Promise.all(projects.map(async (project) => {
+            try {
+              const chainProject = await contract.projects(project.id);
+              const exists = Boolean(chainProject.exists ?? chainProject[14]);
+              if (!exists) return [project.id, null] as const;
+              return [project.id, Number(chainProject.totalBudget ?? chainProject[2] ?? 0)] as const;
+            } catch {
+              return [project.id, null] as const;
             }
-          }
+          }));
 
-          return next;
+          if (!isMounted) return;
+
+          setChainBudgets((prev) => {
+            const next = { ...prev };
+
+            for (const [projectId, budget] of snapshots) {
+              if (typeof budget === 'number' && Number.isFinite(budget)) {
+                next[projectId] = budget;
+                updateStoredChainBudget(projectId, budget);
+              }
+            }
+
+            return next;
+          });
         });
       } catch (error) {
         console.warn('Unable to compare dashboard projects against Sepolia.', error);
@@ -805,7 +802,7 @@ export const Dashboard = () => {
             No Budget Officer action is pending right now.
           </div>
         );
-      case 'Treasurer':
+      case 'Treasurer': {
         const pendingAllocationApproval = project.transactions.find(
           (tx) => tx.type === 'Allocation (SARO)' && tx.status === '1/2 Signed'
         ) || (project.status === 'SARO Approved - Pending Treasurer' && project.saro ? {
@@ -820,20 +817,12 @@ export const Dashboard = () => {
           status: '1/2 Signed' as const,
           hash: project.blockchainTxHash,
         } : undefined);
-        const verifiedMilestone = project.milestones.find(m => m.status === 'Verified');
         const hasSaro = !!project.saro;
-        const signedTransactionRequest = project.transactions.find(
-          (tx) => tx.type === 'Disbursement (NCA)' && tx.status === '1/2 Signed'
-        );
-        const pendingTransactionRequest = project.transactions.find(
-          (tx) => tx.type === 'Disbursement (NCA)' && tx.status === 'Pending Transaction'
-        );
-        const isReadyForDisbursement = hasSaro && !!signedTransactionRequest;
-        const trancheAmount = signedTransactionRequest?.amount || (verifiedMilestone ? project.totalBudget * (verifiedMilestone.percentage / 100) : 0);
+        const isProjectOperational = project.status === 'ACTIVE' || project.status === 'In Progress';
 
         if (project.status === 'Rejected - Budget Officer' || project.status === 'Rejected - Treasurer') {
           return (
-            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-800">
+            <div className="mt-4 p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 rounded-lg text-red-800 dark:text-red-300">
               This project is in a terminal state: <strong>{project.status}</strong>.
               {project.rejectionReason ? ` Reason: ${project.rejectionReason}` : ''}
             </div>
@@ -842,7 +831,7 @@ export const Dashboard = () => {
 
         if (project.status === 'MPDC Approved') {
           return (
-            <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-lg text-slate-600">
+            <div className="mt-4 p-4 bg-slate-50 dark:bg-[#121520] border border-slate-200 dark:border-[#1e2334] rounded-lg text-slate-600 dark:text-slate-400">
               Treasury action is not available yet. Wait for the Budget Officer to create the SARO first.
             </div>
           );
@@ -851,17 +840,17 @@ export const Dashboard = () => {
         if (project.status === 'SARO Approved - Pending Treasurer' && pendingAllocationApproval) {
           return (
             <div className="mt-4 space-y-4">
-              <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-lg">
-                <h4 className="font-semibold text-emerald-900 mb-2 flex items-center"><ShieldCheck className="w-4 h-4 mr-2" /> Gate 2: Treasury Activation</h4>
-                <p className="text-sm text-emerald-700 mb-4">
+              <div className="p-4 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/50 rounded-lg">
+                <h4 className="font-semibold text-emerald-900 dark:text-emerald-300 mb-2 flex items-center"><ShieldCheck className="w-4 h-4 mr-2" /> Gate 2: Treasury Activation</h4>
+                <p className="text-sm text-emerald-700 dark:text-emerald-400 mb-4">
                   Verify the SARO, confirm treasury availability, and apply the second signature. This generates the project-level digital seal of truth and activates the project.
                 </p>
-                <div className="rounded-lg bg-white border border-emerald-200 p-3 mb-3 text-sm text-slate-700">
-                  <div className="font-medium text-slate-900">{pendingAllocationApproval.description}</div>
+                <div className="rounded-lg bg-white dark:bg-[#121727] border border-emerald-200 dark:border-emerald-900/60 p-3 mb-3 text-sm text-slate-700 dark:text-slate-300">
+                  <div className="font-medium text-slate-900 dark:text-white">{pendingAllocationApproval.description}</div>
                   <div className="mt-1">Amount: {formatCurrency(pendingAllocationApproval.amount)}</div>
                   <div className="mt-1">SARO: <span className="font-mono text-xs">{project.saro || 'N/A'}</span></div>
                 </div>
-                <Button type="button" className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={isActivatingProject} onClick={async () => {
+                <Button type="button" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold" disabled={isActivatingProject} onClick={async () => {
                   try {
                     setIsActivatingProject(true);
                     await activateProject(project.id);
@@ -883,8 +872,8 @@ export const Dashboard = () => {
                 </Button>
               </div>
 
-              <div className="p-4 bg-white border border-red-200 rounded-lg">
-                <h4 className="font-semibold text-red-800 mb-2">Reject At Gate 2</h4>
+              <div className="p-4 bg-white dark:bg-[#121520] border border-red-200 dark:border-red-900/50 rounded-lg">
+                <h4 className="font-semibold text-red-800 dark:text-red-400 mb-2">Reject At Gate 2</h4>
                 <form className="space-y-3" onSubmit={async (e) => {
                   e.preventDefault();
                   const form = e.currentTarget;
@@ -901,7 +890,7 @@ export const Dashboard = () => {
                     setIsRejectingProject(false);
                   }
                 }}>
-                  <Input name="treasuryRejectionReason" placeholder="Rejection reason" required disabled={isRejectingProject} />
+                  <Input name="treasuryRejectionReason" placeholder="Rejection reason" required disabled={isRejectingProject} className="dark:bg-[#181c2b] dark:border-[#1e2334]" />
                   <Button type="submit" variant="destructive" className="w-full" disabled={isRejectingProject}>
                     {isRejectingProject ? (
                       <>
@@ -918,64 +907,149 @@ export const Dashboard = () => {
           );
         }
 
-        return (
-          <div className={`mt-4 p-4 rounded-lg ${isReadyForDisbursement ? 'bg-emerald-50 border border-emerald-100' : 'bg-slate-50 border border-slate-200'}`}>
-            <h4 className="font-semibold text-emerald-900 mb-2 flex items-center"><Landmark className="w-4 h-4 mr-2" /> Fund Disbursement (NCA)</h4>
-            <p className={`text-sm mb-4 ${isReadyForDisbursement ? 'text-emerald-700' : 'text-slate-500'}`}>
-              {isReadyForDisbursement
-                ? 'The request already has the Budget Officer signature. Your final signature will trigger disbursement and generate the digital seal of truth.'
-                : 'Disbursement stays blocked until MPDC creates a pending request and the Budget Officer moves it to 1/2 Signed.'
+        // --- DISBURSEMENT PHASE FOR OPERATIONAL PROJECTS ---
+        // Find 1/2 signed transaction requests that target a verified, unpaid milestone
+        const signedRequests = project.transactions.filter(
+          (tx) => tx.type === 'Disbursement (NCA)' && tx.status === '1/2 Signed'
+        );
+
+        const readyTransaction = hasSaro && isProjectOperational
+          ? signedRequests.find((tx) => {
+              const milestoneId = tx.milestoneId || (tx as any).milestone_id;
+              if (milestoneId) {
+                const m = project.milestones.find((milestone) => milestone.id === milestoneId);
+                return m && m.status === 'Verified' && !m.onChainPaid;
               }
-            </p>
-            {!hasSaro && (
-              <div className="mb-3 rounded-lg bg-amber-50 border border-amber-100 p-3 text-amber-800">
-                Budget approval missing: SARO has not been signed by the Budget Officer.
+              return false;
+            })
+          : undefined;
+
+        const readyMilestone = readyTransaction
+          ? project.milestones.find((m) => m.id === (readyTransaction.milestoneId || (readyTransaction as any).milestone_id))
+          : undefined;
+
+        const isReadyForDisbursement = Boolean(readyTransaction && readyMilestone);
+
+        // If a disbursement is genuinely ready, render the execution card
+        if (isReadyForDisbursement && readyTransaction && readyMilestone) {
+          const trancheAmount = readyTransaction.amount || Math.round((project.allocatedFunds || project.totalBudget) * (readyMilestone.percentage / 100));
+
+          return (
+            <div className="mt-4 rounded-xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-950/20 p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <h4 className="font-bold text-emerald-950 dark:text-emerald-300 flex items-center text-base">
+                  <Landmark className="w-5 h-5 mr-2 text-emerald-700 dark:text-emerald-400" />
+                  Fund Disbursement (NCA)
+                </h4>
+                <Badge className="bg-emerald-600 text-white font-medium text-xs">Ready for Execution</Badge>
               </div>
-            )}
-            {!signedTransactionRequest && pendingTransactionRequest && (
-              <div className="mb-3 rounded-lg bg-amber-50 border border-amber-100 p-3 text-amber-800">
-                Waiting for Budget Officer signature. Current request status: Pending Transaction.
-              </div>
-            )}
-            {!signedTransactionRequest && !pendingTransactionRequest && (
-              <div className="mb-3 rounded-lg bg-amber-50 border border-amber-100 p-3 text-amber-800">
-                MPDC approval missing: no 1/2 signed transaction request is available yet.
-              </div>
-            )}
-            <form className="space-y-3" onSubmit={async (e) => {
-              e.preventDefault();
-              try {
-                if (!signedTransactionRequest?.milestoneId) {
-                  throw new Error('Payment blocked: waiting for a 1/2 signed request from the Budget Officer.');
+              <p className="text-sm text-emerald-800 dark:text-emerald-400/90 mb-4">
+                The disbursement request for <strong className="font-semibold">{readyMilestone.title} ({readyMilestone.percentage}%)</strong> has been validated and signed by the Budget Officer. Your final signature will trigger disbursement and generate the digital seal of truth.
+              </p>
+              <form className="space-y-3" onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  setIsExecutingDisbursement(true);
+                  await processPayment(project.id, readyMilestone.id);
+                  alert('Disbursement executed successfully. Digital Seal of Truth generated.');
+                } catch (error: any) {
+                  alert(error?.message || 'Disbursement blocked by blockchain.');
+                } finally {
+                  setIsExecutingDisbursement(false);
                 }
-                setIsExecutingDisbursement(true);
-                await processPayment(project.id, signedTransactionRequest.milestoneId);
-                alert('Disbursement executed successfully. Digital Seal of Truth generated.');
-              } catch (error: any) {
-                alert(error?.message || 'Disbursement blocked by blockchain.');
-              } finally {
-                setIsExecutingDisbursement(false);
-              }
-            }}>
-              <div className={`bg-white p-3 rounded ${isReadyForDisbursement ? 'border border-emerald-200' : 'border border-slate-200'} mb-3`}>
-                <div className="text-xs font-semibold uppercase tracking-wider mb-1">Suggested Tranche Amount</div>
-                <div className="text-lg font-bold text-slate-900">
-                  {signedTransactionRequest ? formatCurrency(trancheAmount) : 'N/A'}
+              }}>
+                <div className="bg-white dark:bg-[#121520] p-4 rounded-lg border border-emerald-200 dark:border-emerald-800/60 mb-3">
+                  <div className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">Suggested Tranche Amount</div>
+                  <div className="text-2xl font-black text-slate-950 dark:text-white">
+                    {formatCurrency(trancheAmount)}
+                  </div>
+                  <div className="mt-1 flex items-center text-xs text-slate-500 dark:text-slate-400">
+                    <span>Target Milestone: <strong className="font-semibold text-slate-700 dark:text-slate-300">{readyMilestone.title}</strong></span>
+                    <span className="mx-2">•</span>
+                    <span>Share: <strong className="font-semibold text-slate-700 dark:text-slate-300">{readyMilestone.percentage}%</strong></span>
+                  </div>
                 </div>
+                <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold h-11" disabled={isExecutingDisbursement}>
+                  {isExecutingDisbursement ? (
+                    <>
+                      <LoaderCircle className="w-4 h-4 mr-2 animate-spin" />
+                      Executing Disbursement & Generating Digital Seal...
+                    </>
+                  ) : (
+                    'Execute Disbursement'
+                  )}
+                </Button>
+              </form>
+            </div>
+          );
+        }
+
+        // When NO fund disbursement is ready, do not show the execution card.
+        // Instead, display a clean, professional status indicator.
+        const allMilestonesPaid = project.milestones.length > 0 && project.milestones.every((m) => m.status === 'Paid' || m.onChainPaid);
+        if (allMilestonesPaid) {
+          return (
+            <div className="mt-4 rounded-xl border border-slate-200 dark:border-[#1e2334] bg-white dark:bg-[#121520] p-5 text-center shadow-sm">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400">
+                <CheckCircle className="h-5 w-5" />
               </div>
-              <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700" disabled={isExecutingDisbursement}>
-                {isExecutingDisbursement ? (
-                  <>
-                    <LoaderCircle className="w-4 h-4 mr-2 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  'Execute Disbursement'
-                )}
-              </Button>
-            </form>
+              <h4 className="text-base font-bold text-slate-900 dark:text-white">All Milestones Fully Disbursed</h4>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                All milestone disbursements for this project have been executed and verified on the blockchain ledger.
+              </p>
+            </div>
+          );
+        }
+
+        const pendingBudgetOfficerRequest = project.transactions.find(
+          (tx) => tx.type === 'Disbursement (NCA)' && tx.status === 'Pending Transaction'
+        );
+        if (pendingBudgetOfficerRequest) {
+          const pendingMilestoneId = pendingBudgetOfficerRequest.milestoneId || (pendingBudgetOfficerRequest as any).milestone_id;
+          const pendingMilestone = project.milestones.find((m) => m.id === pendingMilestoneId);
+          return (
+            <div className="mt-4 rounded-xl border border-slate-200 dark:border-[#1e2334] bg-white dark:bg-[#121520] p-5 text-center shadow-sm">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400">
+                <Clock className="h-5 w-5" />
+              </div>
+              <h4 className="text-base font-bold text-slate-900 dark:text-white">Disbursement Request Under Review</h4>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                {pendingMilestone
+                  ? `The disbursement request for "${pendingMilestone.title}" is awaiting Budget Officer review and signature (1/2 Signed).`
+                  : 'A disbursement request is currently awaiting Budget Officer review and signature (1/2 Signed).'
+                } Once approved, Treasury controls will unlock here.
+              </p>
+            </div>
+          );
+        }
+
+        const hasVerifiedMilestonesAwaitingRequest = project.milestones.some((m) => m.status === 'Verified' && !m.onChainPaid);
+        if (hasVerifiedMilestonesAwaitingRequest) {
+          return (
+            <div className="mt-4 rounded-xl border border-slate-200 dark:border-[#1e2334] bg-white dark:bg-[#121520] p-5 text-center shadow-sm">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400">
+                <FileSignature className="h-5 w-5" />
+              </div>
+              <h4 className="text-base font-bold text-slate-900 dark:text-white">Awaiting Disbursement Request</h4>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+                Milestone verification is complete. Disbursement controls will be ready here once MPDC submits a disbursement request and the Budget Officer validates it.
+              </p>
+            </div>
+          );
+        }
+
+        return (
+          <div className="mt-4 rounded-xl border border-slate-200 dark:border-[#1e2334] bg-white dark:bg-[#121520] p-5 text-center shadow-sm">
+            <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 dark:bg-[#181c2b] text-slate-500 dark:text-slate-400">
+              <Landmark className="h-5 w-5" />
+            </div>
+            <h4 className="text-base font-bold text-slate-900 dark:text-white">No Fund Disbursement Ready</h4>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400 max-w-md mx-auto">
+              No fund disbursement is ready for execution on this project yet. Tranche disbursements become available once a milestone is verified by MPDC and signed by the Budget Officer.
+            </p>
           </div>
         );
+      }
       case 'Admin':
         return (
           <div className="mt-4 p-4 bg-purple-50 border border-purple-100 rounded-lg">

@@ -19,7 +19,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { TamperingDetectedBadge } from '../../components/security/TamperingDetectedBadge';
-import { getContract, getReadOnlyWeb3Provider } from '../../lib/web3';
+import { getContract, getReadOnlyWeb3Provider, withRpcFallback } from '../../lib/web3';
 import { isProjectTampered } from '../../lib/projectIntegrity';
 import { isProjectDelayed } from '../../lib/scheduleStatus';
 import { readStoredChainBudgets, updateStoredChainBudget } from '../../lib/chainBudgetCache';
@@ -158,45 +158,42 @@ export const PublicProjects = () => {
         return;
       }
 
-      const provider = getReadOnlyWeb3Provider();
-      if (!provider) {
-        return;
-      }
-
       try {
-        const contract = await getContract(provider);
-        const snapshots = await Promise.all(
-          projects.map(async (project) => {
-            try {
-              const chainProject = await contract.projects(project.id);
-              const exists = Boolean(chainProject.exists ?? chainProject[14]);
-              if (!exists) {
+        await withRpcFallback(async (provider) => {
+          const contract = await getContract(provider);
+          const snapshots = await Promise.all(
+            projects.map(async (project) => {
+              try {
+                const chainProject = await contract.projects(project.id);
+                const exists = Boolean(chainProject.exists ?? chainProject[14]);
+                if (!exists) {
+                  return [project.id, null] as const;
+                }
+
+                const totalBudget = Number(chainProject.totalBudget ?? chainProject[2] ?? 0);
+                return [project.id, { totalBudget }] as const;
+              } catch {
                 return [project.id, null] as const;
               }
+            })
+          );
 
-              const totalBudget = Number(chainProject.totalBudget ?? chainProject[2] ?? 0);
-              return [project.id, { totalBudget }] as const;
-            } catch {
-              return [project.id, null] as const;
-            }
-          })
-        );
-
-        if (!isMounted) {
-          return;
-        }
-
-        setChainBudgets((prev) => {
-          const next = { ...prev };
-
-          for (const [projectId, snapshot] of snapshots) {
-            if (snapshot) {
-              next[projectId] = snapshot;
-              updateStoredChainBudget(projectId, snapshot.totalBudget);
-            }
+          if (!isMounted) {
+            return;
           }
 
-          return next;
+          setChainBudgets((prev) => {
+            const next = { ...prev };
+
+            for (const [projectId, snapshot] of snapshots) {
+              if (snapshot) {
+                next[projectId] = snapshot;
+                updateStoredChainBudget(projectId, snapshot.totalBudget);
+              }
+            }
+
+            return next;
+          });
         });
       } catch (error) {
         console.warn('Unable to verify project budgets against Sepolia.', error);

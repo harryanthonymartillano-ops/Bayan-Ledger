@@ -37,9 +37,9 @@ create table if not exists public.projects (
   start_date timestamptz,
   end_date timestamptz,
   stakeholders jsonb not null default '[]'::jsonb,
-  total_budget bigint not null,
-  allocated_funds bigint not null default 0,
-  disbursed_funds bigint not null default 0,
+  total_budget numeric(15,2) not null,
+  allocated_funds numeric(15,2) not null default 0,
+  disbursed_funds numeric(15,2) not null default 0,
   status text not null default 'MPDC Approved',
   saro text,
   metadata_hash text,
@@ -66,7 +66,7 @@ create table if not exists public.milestones (
   title text not null,
   description text,
   due_date timestamptz,
-  budget bigint not null default 0,
+  budget numeric(15,2) not null default 0,
   deliverables jsonb not null default '[]'::jsonb,
   percentage integer not null check (percentage >= 0 and percentage <= 100),
   status text not null default 'Pending',
@@ -134,7 +134,7 @@ create table if not exists public.transactions (
   id text primary key,
   project_id text not null references public.projects(id) on delete cascade,
   milestone_id text references public.milestones(id) on delete set null,
-  amount bigint not null,
+  amount numeric(15,2) not null,
   type text not null,
   date timestamptz not null,
   recipient text,
@@ -226,6 +226,12 @@ alter table public.project_comments add column if not exists insightful_count in
 alter table public.project_comments add column if not exists is_flagged boolean not null default false;
 alter table public.project_comments add column if not exists status text not null default 'published';
 alter table public.project_comments add column if not exists ip_hash text;
+
+alter table public.projects alter column total_budget type numeric(15,2);
+alter table public.projects alter column allocated_funds type numeric(15,2);
+alter table public.projects alter column disbursed_funds type numeric(15,2);
+alter table public.milestones alter column budget type numeric(15,2);
+alter table public.transactions alter column amount type numeric(15,2);
 
 -- Create indexes for better query performance
 create index if not exists idx_projects_budget_source on public.projects(budget_source);

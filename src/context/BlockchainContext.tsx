@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useMemo } from 'react';
 import { Role, useAuth } from './AuthContext';
-import { connectWallet, getContract, getWeb3Provider, getReadOnlyWeb3Provider } from '../lib/web3';
+import { connectWallet, getContract, getWeb3Provider, getReadOnlyWeb3Provider, withRpcFallback, waitForTransaction, SEPOLIA_METAMASK_RPCS } from '../lib/web3';
 import { uploadToIPFS, generateVerificationHash } from '../lib/ipfs';
 import { generateTransactionHash } from '../lib/hashUtils';
 import apiClient from '../lib/apiClient';
@@ -1111,51 +1111,55 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
 
   const refreshChainBudgets = async () => {
     if (projects.length === 0) return readStoredChainBudgets();
-    const provider = getReadOnlyWeb3Provider();
-    if (!provider) return readStoredChainBudgets();
 
     try {
-      const contractInstance = await getContract(provider);
-      const snapshots = await Promise.all(
-        projects.map(async (project) => {
-          try {
-            const chainProject = await contractInstance.projects(project.id);
-            const exists = Boolean(chainProject.exists ?? chainProject[14]);
-            if (!exists) return [project.id, null] as const;
-            const totalBudget = Number(chainProject.totalBudget ?? chainProject[2] ?? 0);
-            return [project.id, totalBudget] as const;
-          } catch {
-            return [project.id, null] as const;
-          }
-        })
-      );
+      return await withRpcFallback(async (provider) => {
+        const contractInstance = await getContract(provider);
+        const snapshots: Array<readonly [string, number | null]> = [];
+        const batchSize = 5;
+        for (let i = 0; i < projects.length; i += batchSize) {
+          const batch = projects.slice(i, i + batchSize);
+          const batchResults = await Promise.all(
+            batch.map(async (project) => {
+              try {
+                const chainProject = await contractInstance.projects(project.id);
+                const exists = Boolean(chainProject.exists ?? chainProject[14]);
+                if (!exists) return [project.id, null] as const;
+                const totalBudget = Number(chainProject.totalBudget ?? chainProject[2] ?? 0);
+                return [project.id, totalBudget] as const;
+              } catch {
+                return [project.id, null] as const;
+              }
+            })
+          );
+          snapshots.push(...batchResults);
+        }
 
-      const current = readStoredChainBudgets();
-      let hasUpdate = false;
-      const nextBudgets: Record<string, number> = { ...current };
+        const current = readStoredChainBudgets();
+        let hasUpdate = false;
+        const nextBudgets: Record<string, number> = { ...current };
 
-      for (const [id, budget] of snapshots) {
-        if (typeof budget === 'number' && Number.isFinite(budget)) {
-          const project = projects.find((p) => p.id === id);
-          const effectiveBudget =
-            project &&
-              Math.abs(project.totalBudget - budget) < 1 &&
-              Math.round(project.totalBudget) === Math.round(budget)
-              ? project.totalBudget
-              : budget;
+        for (const [id, budget] of snapshots) {
+          if (typeof budget === 'number' && Number.isFinite(budget)) {
+            const project = projects.find((p) => p.id === id);
+            const effectiveBudget =
+              project && Math.abs(project.totalBudget - budget) < 1
+                ? project.totalBudget
+                : budget;
 
-          if (nextBudgets[id] !== effectiveBudget) {
-            nextBudgets[id] = effectiveBudget;
-            hasUpdate = true;
+            if (nextBudgets[id] !== effectiveBudget) {
+              nextBudgets[id] = effectiveBudget;
+              hasUpdate = true;
+            }
           }
         }
-      }
 
-      if (hasUpdate) {
-        writeStoredChainBudgets(nextBudgets);
-        setChainBudgets(nextBudgets);
-      }
-      return nextBudgets;
+        if (hasUpdate) {
+          writeStoredChainBudgets(nextBudgets);
+          setChainBudgets(nextBudgets);
+        }
+        return nextBudgets;
+      });
     } catch (err) {
       console.warn('Unable to verify chain budgets against Sepolia:', err);
       return readStoredChainBudgets();
@@ -1203,10 +1207,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
               symbol: 'ETH',
               decimals: 18,
             },
-            rpcUrls: [
-              'https://sepolia.infura.io/v3/94868e8cc29b45c39a4fb474e5fae485',
-              'https://rpc.sepolia.org',
-            ],
+            rpcUrls: SEPOLIA_METAMASK_RPCS,
             blockExplorerUrls: ['https://sepolia.etherscan.io'],
           },
         ]);
@@ -1786,9 +1787,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     if (Number.isFinite(totalBudget) && totalBudget > 0) {
       const currentProject = projects.find((project) => project.id === projectId);
       const effectiveTotalBudget =
-        currentProject &&
-          Math.abs(currentProject.totalBudget - totalBudget) < 1 &&
-          Math.round(currentProject.totalBudget) === Math.round(totalBudget)
+        currentProject && Math.abs(currentProject.totalBudget - totalBudget) < 1
           ? currentProject.totalBudget
           : totalBudget;
 
@@ -1901,7 +1900,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     await ensureBlockchainReady('Admin');
     const roleHash = await getRoleIdentifier(role);
     const tx = await contract.grantRole(roleHash, walletAddress);
-    await tx.wait();
+    await waitForTransaction(tx);
 
     logAction('Role Granted', 'Admin', `Granted ${role} to ${walletAddress}`, tx.hash);
     return tx.hash;
@@ -1915,7 +1914,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
     await ensureBlockchainReady('Admin');
     const roleHash = await getRoleIdentifier(role);
     const tx = await contract.revokeRole(roleHash, walletAddress);
-    await tx.wait();
+    await waitForTransaction(tx);
 
     logAction('Role Revoked', 'Admin', `Revoked ${role} from ${walletAddress}`, tx.hash);
     return tx.hash;
@@ -2108,7 +2107,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
           ...txRequest,
           gasLimit: ethers.BigNumber.from(500000),
         });
-        await tx.wait();
+        await waitForTransaction(tx);
         txHash = tx.hash;
         isOnChain = true;
         cancelSyncedOnChain = true;
@@ -2284,7 +2283,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
         ...txRequest,
         gasLimit: ethers.BigNumber.from(900000),
       });
-      await tx.wait();
+      await waitForTransaction(tx);
       txHash = tx.hash;
       projectCreatedOnChain = true;
     } catch (error) {
@@ -2417,7 +2416,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       } else {
         tx = await contract!.verifyMilestone(projectId, milestoneId, milestone.percentage, ipfsHash);
       }
-      await tx.wait();
+      await waitForTransaction(tx);
       txHash = tx.hash;
       console.log("Milestone verified on blockchain:", tx.hash);
     } catch (error) {
@@ -2578,7 +2577,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
         const onChainAmount = Math.round(txData.amount);
         if (txData.status === 'Rejected - Budget Officer') {
           const tx = await contract!.rejectProjectByBudgetOfficer(projectId, txData.description);
-          await tx.wait();
+          await waitForTransaction(tx);
           txHash = tx.hash;
         } else {
           // Preflight: check on-chain state to prevent revert if already allocated or clamp amount
@@ -2615,7 +2614,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
             const targetOnChainAmount = remainingBudget > 0 ? Math.min(onChainAmount, remainingBudget) : onChainAmount;
 
             const tx = await contract!.allocateFunds(projectId, targetOnChainAmount, saro || "");
-            await tx.wait();
+            await waitForTransaction(tx);
             txHash = tx.hash;
           }
         }
@@ -2624,11 +2623,11 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
         const tx = contractHasFunction('disburseFundsWithReference(string,uint256,string)')
           ? await contract!.disburseFundsWithReference(projectId, onChainAmount, disbursementReference)
           : await contract!.disburseFunds(projectId, onChainAmount);
-        await tx.wait();
+        await waitForTransaction(tx);
         txHash = tx.hash;
         if (milestoneId && contractHasFunction('markMilestonePaid(string,string)')) {
           const markPaidTx = await contract!.markMilestonePaid(projectId, milestoneId);
-          await markPaidTx.wait();
+          await waitForTransaction(markPaidTx);
         }
       }
     } catch (error) {
@@ -2734,7 +2733,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
         onChainAmountDue,
         metadataHash
       );
-      await tx.wait();
+      await waitForTransaction(tx);
       requestTxHash = tx.hash;
 
       const chainRequest = await readDisbursementRequestFromChain(requestId);
@@ -2823,7 +2822,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       }
 
       const tx = await contract!.signDisbursementRequestByBudgetOfficer(transactionId, supportingReference);
-      await tx.wait();
+      await waitForTransaction(tx);
       budgetTxHash = tx.hash;
     } catch (error) {
       throw new Error(describeBlockchainFailure('Budget Officer signature', error));
@@ -2928,7 +2927,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       );
 
       const tx = await contract!.executeDisbursementRequest(signedRequest.id, provisionalDigitalSeal);
-      await tx.wait();
+      await waitForTransaction(tx);
       executionTxHash = tx.hash;
       digitalSealHash = buildDigitalSealHash(signedRequest.id, projectId, milestoneId, amountDue, executionTxHash);
     } catch (error) {
@@ -3076,7 +3075,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       }
 
       const tx = await contract!.approveProjectActivation(projectId, provisionalSeal);
-      await tx.wait();
+      await waitForTransaction(tx);
       executionTxHash = tx.hash;
       treasurySealHash = buildDigitalSealHash(
         targetAllocationTx.id,
@@ -3148,7 +3147,7 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
       }
 
       const tx = await contract!.rejectProjectByTreasurer(projectId, trimmedReason);
-      await tx.wait();
+      await waitForTransaction(tx);
       rejectionTxHash = tx.hash;
     } catch (error) {
       throw new Error(describeBlockchainFailure('Treasury rejection', error));

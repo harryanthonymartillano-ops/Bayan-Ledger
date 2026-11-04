@@ -16,7 +16,7 @@ module.exports = {
   networks: {
     hardhat: {},
     sepolia: {
-      url: process.env.SEPOLIA_URL || 'https://eth-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_KEY',
+      url: process.env.SEPOLIA_URL || 'https://ethereum-sepolia-rpc.publicnode.com',
       accounts: [process.env.PRIVATE_KEY || '0x0000000000000000000000000000000000000000000000000000000000000000'],
     },
   },
