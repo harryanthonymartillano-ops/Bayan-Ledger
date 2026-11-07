@@ -293,7 +293,8 @@ This capstone research project was conceived, designed, developed, and evaluated
 
 | Deliverable | Platform / Explorer | Direct URL |
 | :--- | :--- | :--- |
-| **Live Production Web Application** | Vercel Deployment | [https://bayan-ledger.vercel.app/](https://bayan-ledger.vercel.app/) |
+| **Live Production Web Application** | Production Domain | [https://bayanledger.live](https://bayanledger.live) |
 | **Official GitHub Research Repository** | GitHub (`teamccs-git`) | [https://github.com/harryanthonymartillano-ops/Bayan-Ledger](https://github.com/harryanthonymartillano-ops/Bayan-Ledger) |
+| **System Demonstration Recording** | Google Drive Archive | [Google Drive Folder](https://drive.google.com/drive/folders/1B2VHdQdO4AMj5giAhAHvdBhdN18uMksj?usp=drive_link) |
 | **Smart Contract Explorer** | Etherscan (Sepolia) | [`0x4db61F54B5d9620E15462D2f360F6236b28961F5`](https://sepolia.etherscan.io/address/0x4db61F54B5d9620E15462D2f360F6236b28961F5) |
 | **Evaluation Submission Account** | GitHub Account | `teamccs-git` |
