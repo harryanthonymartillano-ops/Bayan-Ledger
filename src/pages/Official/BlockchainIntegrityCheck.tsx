@@ -7,7 +7,7 @@ import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { getContract, getReadOnlyWeb3Provider, withRpcFallback } from '../../lib/web3';
 import { isProjectTampered } from '../../lib/projectIntegrity';
-import { readStoredChainBudgets, getStoredChainBudget, updateStoredChainBudget } from '../../lib/chainBudgetCache';
+import { readStoredChainBudgets, getStoredChainBudget, getStoredChainAllocated, updateStoredChainBudget, updateStoredChainProject, readStoredChainData } from '../../lib/chainBudgetCache';
 
 interface IntegrityResult {
   projectId: string;
@@ -176,6 +176,26 @@ export const BlockchainIntegrityCheck: React.FC = () => {
           tampered = true;
           details.push(`TOTAL BUDGET MISMATCH: Database=₱${dbBudget.toLocaleString()}, Blockchain=₱${chainBudget.toLocaleString()}`);
         }
+
+        // Compare allocated funds (SARO)
+        const dbAllocated = project.allocatedFunds;
+        const rawAllocated = chainDetails?.allocatedFunds ?? chainDetails?.[3];
+        const chainAllocated =
+          rawAllocated !== undefined && rawAllocated !== null
+            ? (rawAllocated.toNumber ? rawAllocated.toNumber() : Number(rawAllocated.toString()))
+            : (getStoredChainAllocated(project.id) ?? project.allocatedFunds);
+
+        if (projectExists && isProjectTampered(dbAllocated, chainAllocated)) {
+          tampered = true;
+          details.push(`ALLOCATED FUNDS (SARO) MISMATCH: Database=₱${dbAllocated.toLocaleString()}, Blockchain=₱${chainAllocated.toLocaleString()}`);
+        }
+
+        // Update stored chain data cache with all fields
+        updateStoredChainProject(project.id, {
+          totalBudget: chainBudget,
+          allocatedFunds: chainAllocated,
+          disbursedFunds: project.disbursedFunds,
+        });
 
         // Compare disbursed funds
         const dbDisbursed = project.disbursedFunds;

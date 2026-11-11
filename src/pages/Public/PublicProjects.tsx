@@ -20,37 +20,32 @@ import {
 } from 'lucide-react';
 import { TamperingDetectedBadge } from '../../components/security/TamperingDetectedBadge';
 import { getContract, getReadOnlyWeb3Provider, withRpcFallback } from '../../lib/web3';
-import { isProjectTampered } from '../../lib/projectIntegrity';
+import { isProjectTampered, checkProjectTampering, ProjectTamperCheck } from '../../lib/projectIntegrity';
 import { isProjectDelayed } from '../../lib/scheduleStatus';
-import { readStoredChainBudgets, updateStoredChainBudget } from '../../lib/chainBudgetCache';
+import { readStoredChainData, updateStoredChainProject, ChainProjectData } from '../../lib/chainBudgetCache';
 
 const ITEMS_PER_PAGE = 9;
-
-type ChainBudgetSnapshot = {
-  totalBudget: number;
-};
 
 export const PublicProjects = () => {
   const { projects, chainBudgets: contextChainBudgets } = useBlockchain();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [currentPage, setCurrentPage] = useState(1);
-  const [chainBudgets, setChainBudgets] = useState<Record<string, ChainBudgetSnapshot>>(() => {
-    const cached = readStoredChainBudgets();
-    return Object.entries(cached).reduce<Record<string, ChainBudgetSnapshot>>((acc, [id, totalBudget]) => {
-      acc[id] = { totalBudget };
-      return acc;
-    }, {});
+  const [chainData, setChainData] = useState<Record<string, ChainProjectData>>(() => {
+    return readStoredChainData();
   });
 
   useEffect(() => {
     if (!contextChainBudgets) return;
-    setChainBudgets((prev) => {
+    setChainData((prev) => {
       let changed = false;
       const next = { ...prev };
       for (const [id, totalBudget] of Object.entries(contextChainBudgets)) {
         if (typeof totalBudget === 'number' && (!next[id] || next[id].totalBudget !== totalBudget)) {
-          next[id] = { totalBudget };
+          next[id] = {
+            ...(next[id] || { totalBudget }),
+            totalBudget,
+          };
           changed = true;
         }
       }
@@ -140,60 +135,79 @@ export const PublicProjects = () => {
   }, [filteredProjects]);
 
   const tamperedProjects = useMemo(() => {
-    return projects.filter((project) => {
-      const chainSnapshot = chainBudgets[project.id];
-      if (!chainSnapshot) return false;
-      return isProjectTampered(project.totalBudget, chainSnapshot.totalBudget);
-    });
-  }, [projects, chainBudgets]);
+    return projects
+      .map((project) => {
+        const chainSnapshot = chainData[project.id];
+        const status = checkProjectTampering(project, chainSnapshot);
+        return {
+          project,
+          status,
+        };
+      })
+      .filter((item) => item.status.isTampered);
+  }, [projects, chainData]);
 
   useEffect(() => {
     let isMounted = true;
 
     const loadChainBudgets = async () => {
       if (projects.length === 0) {
-        if (isMounted) {
-          setChainBudgets({});
-        }
-        return;
+        return; // Retain cached data; do not overwrite with empty state
       }
+
+      // Prioritize currently visible projects, then load remaining projects
+      const visibleSet = new Set(currentProjects.map((p) => p.id));
+      const orderedProjects = [
+        ...currentProjects,
+        ...projects.filter((p) => !visibleSet.has(p.id)),
+      ];
 
       try {
         await withRpcFallback(async (provider) => {
           const contract = await getContract(provider);
-          const snapshots = await Promise.all(
-            projects.map(async (project) => {
-              try {
-                const chainProject = await contract.projects(project.id);
-                const exists = Boolean(chainProject.exists ?? chainProject[14]);
-                if (!exists) {
+          const batchSize = 3;
+
+          for (let i = 0; i < orderedProjects.length; i += batchSize) {
+            if (!isMounted) break;
+            const batch = orderedProjects.slice(i, i + batchSize);
+
+            const batchResults = await Promise.all(
+              batch.map(async (project) => {
+                try {
+                  const chainProject = await contract.projects(project.id);
+                  const exists = Boolean(chainProject.exists ?? chainProject[14]);
+                  if (!exists) {
+                    return [project.id, null] as const;
+                  }
+
+                  const totalBudget = Number(chainProject.totalBudget ?? chainProject[2] ?? 0);
+                  const allocatedFunds = Number(chainProject.allocatedFunds ?? chainProject[3] ?? 0);
+                  const disbursedFunds = Number(chainProject.disbursedFunds ?? chainProject[4] ?? 0);
+
+                  return [project.id, { totalBudget, allocatedFunds, disbursedFunds }] as const;
+                } catch {
                   return [project.id, null] as const;
                 }
+              })
+            );
 
-                const totalBudget = Number(chainProject.totalBudget ?? chainProject[2] ?? 0);
-                return [project.id, { totalBudget }] as const;
-              } catch {
-                return [project.id, null] as const;
+            if (!isMounted) break;
+
+            setChainData((prev) => {
+              let updated = false;
+              const next = { ...prev };
+
+              for (const [projectId, snapshot] of batchResults) {
+                if (snapshot) {
+                  next[projectId] = snapshot;
+                  updateStoredChainProject(projectId, snapshot);
+                  updated = true;
+                }
               }
-            })
-          );
 
-          if (!isMounted) {
-            return;
+              return updated ? next : prev;
+            });
           }
-
-          setChainBudgets((prev) => {
-            const next = { ...prev };
-
-            for (const [projectId, snapshot] of snapshots) {
-              if (snapshot) {
-                next[projectId] = snapshot;
-                updateStoredChainBudget(projectId, snapshot.totalBudget);
-              }
-            }
-
-            return next;
-          });
         });
       } catch (error) {
         console.warn('Unable to verify project budgets against Sepolia.', error);
@@ -205,7 +219,7 @@ export const PublicProjects = () => {
     return () => {
       isMounted = false;
     };
-  }, [projects]);
+  }, [projects, visibleProjectIds]);
 
   useEffect(() => {
     if (selectedCategory !== 'All' && !usedCategories.includes(selectedCategory)) {
@@ -393,18 +407,21 @@ export const PublicProjects = () => {
                 </div>
                 <p className="mt-1 text-xs text-red-800 leading-relaxed max-w-4xl">
                   A cryptographic verification mismatch was identified between the local municipal server records and the decentralized Sepolia blockchain ledger.
-                  Direct database modifications bypassing multi-sig verification gates have been flagged.
+                  Direct database alterations to project budgets or SARO fund allocations have been flagged.
                   The blockchain ledger value remains the authoritative public reference.
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {tamperedProjects.map((tp) => (
+                  {tamperedProjects.map(({ project: tp, status: tpStatus }) => (
                     <Link
                       key={tp.id}
                       to={`/project/${tp.id}`}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1 text-xs font-bold text-red-700 shadow-2xs hover:bg-red-50 transition-colors"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-xs font-bold text-red-700 shadow-2xs hover:bg-red-50 transition-colors"
                     >
                       <span>{tp.name}</span>
                       <span className="text-[10px] font-mono text-red-500">({tp.id})</span>
+                      <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] text-red-800 font-semibold">
+                        {tpStatus.tamperSummary}
+                      </span>
                       <ArrowRight className="h-3 w-3" />
                     </Link>
                   ))}
@@ -423,29 +440,28 @@ export const PublicProjects = () => {
               const verifiedMilestones = project.milestones.filter(
                 (milestone) => milestone.status === 'Verified' || milestone.status === 'Paid'
               ).length;
-              const budgetIsTampered = isProjectTampered(
-                project.totalBudget,
-                chainBudgets[project.id]?.totalBudget ?? project.totalBudget
-              );
+              const projectTamper = checkProjectTampering(project, chainData[project.id]);
+              const isTampered = projectTamper.isTampered;
               const projectDelayed = isProjectDelayed(project);
 
               return (
                 <Link to={`/project/${project.id}`} key={project.id} className="group flex flex-col">
                   <Card
-                    className={`relative flex-1 flex flex-col justify-between rounded-xl bg-white p-5 shadow-sm transition-all hover:shadow-md ${budgetIsTampered
-                        ? 'border-2 border-red-500 ring-2 ring-red-100 bg-red-50/10'
+                    className={`relative flex-1 flex flex-col justify-between rounded-xl bg-white p-5 shadow-sm transition-all hover:shadow-md ${
+                      isTampered
+                        ? 'border-2 border-red-500 ring-2 ring-red-100 bg-red-50/15'
                         : 'border border-slate-200 hover:border-slate-300'
-                      }`}
+                    }`}
                   >
                     <div className="space-y-3">
                       {/* Tampering Warning Banner clearly visible inside the tampered project card */}
-                      {budgetIsTampered && (
-                        <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-800 animate-pulse">
+                      {isTampered && (
+                        <div className="flex items-center justify-between rounded-lg border border-red-300 bg-red-100/90 px-3 py-2 text-xs font-bold text-red-900 animate-pulse">
                           <span className="flex items-center gap-1.5">
-                            <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
-                            <span>Tampering Detected: Budget Mismatch</span>
+                            <AlertTriangle className="h-4 w-4 text-red-700 shrink-0" />
+                            <span>Tampering Detected: {projectTamper.tamperSummary}</span>
                           </span>
-                          <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] uppercase font-bold text-white">
+                          <span className="rounded bg-red-700 px-1.5 py-0.5 text-[10px] uppercase font-bold text-white shadow-xs">
                             Alert
                           </span>
                         </div>
@@ -456,7 +472,7 @@ export const PublicProjects = () => {
                           {project.id}
                         </span>
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          {budgetIsTampered && (
+                          {isTampered && (
                             <TamperingDetectedBadge visible={true} />
                           )}
                           {projectDelayed && (
@@ -481,10 +497,32 @@ export const PublicProjects = () => {
 
                       {/* Clean Financial Progress Section */}
                       <div className="rounded-lg border border-slate-100 bg-[#fafaf9] p-3 space-y-2.5">
-                        <div className="flex items-baseline justify-between">
-                          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Budget</span>
-                          <span className="text-sm font-extrabold text-slate-900">{formatCurrency(project.totalBudget)}</span>
-                        </div>
+                        {projectTamper.budgetTampered ? (
+                          <div className="space-y-1">
+                            <div className="flex items-baseline justify-between text-xs">
+                              <span className="text-[11px] font-bold uppercase tracking-wider text-red-700">Compromised DB Budget</span>
+                              <span className="text-sm font-bold text-red-700 line-through">{formatCurrency(project.totalBudget)}</span>
+                            </div>
+                            <div className="flex items-baseline justify-between text-xs">
+                              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-800">Authentic Chain Budget</span>
+                              <span className="text-sm font-extrabold text-emerald-700">{formatCurrency(projectTamper.chainBudget!)}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Budget</span>
+                            <span className="text-sm font-extrabold text-slate-900">{formatCurrency(project.totalBudget)}</span>
+                          </div>
+                        )}
+
+                        {projectTamper.allocatedTampered && (
+                          <div className="rounded-md border border-red-200 bg-red-50 p-2 text-[11px] text-red-900">
+                            <p className="font-bold">⚠️ SARO Allocation Alteration Detected</p>
+                            <p className="text-red-700">
+                              DB: <span className="line-through">{formatCurrency(project.allocatedFunds)}</span> → Chain: <strong className="text-emerald-700">{formatCurrency(projectTamper.chainAllocated!)}</strong>
+                            </p>
+                          </div>
+                        )}
 
                         {/* SARO Progress Bar */}
                         <div>

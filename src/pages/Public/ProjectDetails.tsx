@@ -49,10 +49,10 @@ import { DatabaseBreachAlert } from '../../components/security/DatabaseBreachAle
 import { TamperingDetectedBadge } from '../../components/security/TamperingDetectedBadge';
 import { MediaLightbox, MediaLightboxItem } from '../../components/MediaLightbox';
 import { getContract, getReadOnlyWeb3Provider, withRpcFallback } from '../../lib/web3';
-import { isProjectTampered } from '../../lib/projectIntegrity';
+import { isProjectTampered, checkProjectTampering } from '../../lib/projectIntegrity';
 import { censorProfanity } from '../../lib/profanityFilter';
 import { isMilestoneDelayed, isProjectDelayed } from '../../lib/scheduleStatus';
-import { getStoredChainBudget, updateStoredChainBudget } from '../../lib/chainBudgetCache';
+import { getStoredChainBudget, getStoredChainAllocated, updateStoredChainBudget, updateStoredChainProject } from '../../lib/chainBudgetCache';
 import { getStoredProjectById } from '../../lib/projectCache';
 import { ProjectImageThumbnail } from '../../components/ProjectImageThumbnail';
 
@@ -484,6 +484,11 @@ export const ProjectDetails = () => {
     return getStoredChainBudget(id);
   });
 
+  const [blockchainAllocated, setBlockchainAllocated] = useState<number | null>(() => {
+    if (!id) return null;
+    return getStoredChainAllocated(id);
+  });
+
   useEffect(() => {
     if (!id || !chainBudgets) return;
     const fromContext = chainBudgets[id];
@@ -581,7 +586,20 @@ export const ProjectDetails = () => {
   }, [rawProject, summary, id]);
 
   const projectTransactionHash = displayProject.transactions?.find((transaction: any) => transaction.hash)?.hash || displayProject.blockchainTxHash || null;
-  const tamperingDetected = blockchainPrice !== null && isProjectTampered(displayProject.totalBudget, blockchainPrice);
+  const tamperStatus = checkProjectTampering(
+    {
+      totalBudget: displayProject.totalBudget,
+      allocatedFunds: displayProject.allocatedFunds,
+      disbursedFunds: displayProject.disbursedFunds,
+    },
+    blockchainPrice !== null || blockchainAllocated !== null
+      ? {
+          totalBudget: blockchainPrice ?? undefined,
+          allocatedFunds: blockchainAllocated ?? undefined,
+        }
+      : null
+  );
+  const tamperingDetected = tamperStatus.isTampered;
   const activePreview = selectedPreviewIndex !== null ? previewItems[selectedPreviewIndex] : null;
   const effectiveSummary = summary || deriveTransparencySummaryFromProject(displayProject);
 
@@ -789,10 +807,18 @@ export const ProjectDetails = () => {
           }
 
           const chainBudget = Number(chainProject.totalBudget ?? chainProject[2] ?? 0);
-          updateStoredChainBudget(id, chainBudget);
+          const chainAllocated = Number(chainProject.allocatedFunds ?? chainProject[3] ?? 0);
+          const chainDisbursed = Number(chainProject.disbursedFunds ?? chainProject[4] ?? 0);
+
+          updateStoredChainProject(id, {
+            totalBudget: chainBudget,
+            allocatedFunds: chainAllocated,
+            disbursedFunds: chainDisbursed,
+          });
 
           if (!cancelled) {
             setBlockchainPrice(chainBudget);
+            setBlockchainAllocated(chainAllocated);
           }
         });
       } catch (error) {
@@ -1151,7 +1177,17 @@ export const ProjectDetails = () => {
           : 'No overdue dates',
       icon: AlertTriangle,
     },
-    { label: 'Blockchain check', value: tamperingDetected ? 'Flagged' : 'Ready', detail: blockchainPrice === null ? 'Awaiting chain read' : 'Budget matched', icon: ShieldCheck },
+    {
+      label: 'Blockchain check',
+      value: tamperingDetected ? 'Flagged' : 'Ready',
+      detail:
+        blockchainPrice === null && blockchainAllocated === null
+          ? 'Awaiting chain read'
+          : tamperingDetected
+          ? tamperStatus.tamperSummary || 'Data alteration detected'
+          : 'Budget & allocations matched',
+      icon: ShieldCheck,
+    },
   ];
 
   return (
@@ -1238,7 +1274,9 @@ export const ProjectDetails = () => {
           <div className="mb-8">
             <DatabaseBreachAlert
               databasePrice={displayProject.totalBudget}
-              blockchainPrice={blockchainPrice}
+              blockchainPrice={blockchainPrice ?? displayProject.totalBudget}
+              databaseAllocated={displayProject.allocatedFunds}
+              blockchainAllocated={blockchainAllocated ?? displayProject.allocatedFunds}
               transactionHash={projectTransactionHash}
             />
           </div>

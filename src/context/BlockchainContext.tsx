@@ -6,9 +6,9 @@ import { generateTransactionHash } from '../lib/hashUtils';
 import apiClient from '../lib/apiClient';
 import { ethers } from 'ethers';
 import { CONTRACT_ADDRESS } from '../lib/web3';
-import { readStoredChainBudgets, writeStoredChainBudgets, updateStoredChainBudget } from '../lib/chainBudgetCache';
+import { readStoredChainBudgets, writeStoredChainBudgets, updateStoredChainBudget, updateStoredChainProject, getStoredChainData, readStoredChainData } from '../lib/chainBudgetCache';
 import { readBreachResolutionOverrides } from '../lib/breachDetection';
-import { isProjectTampered } from '../lib/projectIntegrity';
+import { isProjectTampered, checkProjectTampering } from '../lib/projectIntegrity';
 import { readStoredProjects, writeStoredProjects, hasStoredProjects } from '../lib/projectCache';
 
 const deployedSelectorSupportCache = new Map<string, boolean>();
@@ -1126,6 +1126,9 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
                 const exists = Boolean(chainProject.exists ?? chainProject[14]);
                 if (!exists) return [project.id, null] as const;
                 const totalBudget = Number(chainProject.totalBudget ?? chainProject[2] ?? 0);
+                const allocatedFunds = Number(chainProject.allocatedFunds ?? chainProject[3] ?? 0);
+                const disbursedFunds = Number(chainProject.disbursedFunds ?? chainProject[4] ?? 0);
+                updateStoredChainProject(project.id, { totalBudget, allocatedFunds, disbursedFunds });
                 return [project.id, totalBudget] as const;
               } catch {
                 return [project.id, null] as const;
@@ -1174,16 +1177,20 @@ export const BlockchainProvider = ({ children }: { children: ReactNode }) => {
 
   const tamperedProjects = useMemo(() => {
     const overrides = readBreachResolutionOverrides();
+    const storedChain = readStoredChainData();
     return projects
       .filter((project) => {
-        const chainBudget = chainBudgets[project.id];
-        if (typeof chainBudget !== 'number') return false;
+        const chainBudget = chainBudgets[project.id] ?? storedChain[project.id]?.totalBudget;
+        const chainAllocated = storedChain[project.id]?.allocatedFunds;
+        if (typeof chainBudget !== 'number' && typeof chainAllocated !== 'number') return false;
         const effectiveBudget = overrides[project.id] ?? project.totalBudget;
-        return isProjectTampered(effectiveBudget, chainBudget);
+        const budgetTampered = typeof chainBudget === 'number' && isProjectTampered(effectiveBudget, chainBudget);
+        const allocatedTampered = typeof chainAllocated === 'number' && isProjectTampered(project.allocatedFunds, chainAllocated);
+        return budgetTampered || allocatedTampered;
       })
       .map((project) => ({
         id: project.id,
-        chainBudget: chainBudgets[project.id],
+        chainBudget: chainBudgets[project.id] ?? storedChain[project.id]?.totalBudget ?? project.totalBudget,
         databaseBudget: project.totalBudget,
       }));
   }, [projects, chainBudgets]);
